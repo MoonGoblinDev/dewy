@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>obs-beauty</string>
+	<string>dewy</string>
 	<key>CFBundleIdentifier</key>
 	<string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
 	<key>CFBundleExecutable</key>
-	<string>obs-beauty</string>
+	<string>dewy</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleVersion</key>

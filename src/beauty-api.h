@@ -1,6 +1,6 @@
 #pragma once
 
-/* Functions the dock uses to talk to a Beauty Enhance filter instance. */
+/* Functions the dock uses to talk to a Dewy filter instance. */
 
 #include <obs-module.h>
 #include "face-tracker.h"

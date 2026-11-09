@@ -1,5 +1,5 @@
 /*
-obs-beauty — streaming-app-style beauty filter for OBS
+Dewy — real-time beauty for OBS
 Copyright (C) 2026 Tunelab
 
 This program is free software; you can redistribute it and/or modify
@@ -11,7 +11,7 @@ the Free Software Foundation; either version 2 of the License, or
 #include <obs-module.h>
 
 OBS_DECLARE_MODULE()
-OBS_MODULE_USE_DEFAULT_LOCALE("obs-beauty", "en-US")
+OBS_MODULE_USE_DEFAULT_LOCALE("dewy", "en-US")
 
 #include "makeup.h"
 #include "presets.h"
@@ -21,6 +21,11 @@ OBS_MODULE_USE_DEFAULT_LOCALE("obs-beauty", "en-US")
 
 extern struct obs_source_info beauty_filter_info;
 extern void beauty_dock_register(void);
+
+const char *obs_module_name(void)
+{
+	return "Dewy";
+}
 
 const char *obs_module_description(void)
 {
@@ -60,7 +65,7 @@ bool obs_module_load(void)
 	makeup_presets_load();
 	presets_load();
 	obs_register_source(&beauty_filter_info);
-	blog(LOG_INFO, "[obs-beauty] loaded (version %s)", PLUGIN_VERSION);
+	blog(LOG_INFO, "[dewy] loaded (version %s)", PLUGIN_VERSION);
 	return true;
 }
 

@@ -1,5 +1,5 @@
 /*
- * "Beauty Enhance" video filter.
+ * Dewy: the "Dewy" video filter (filter id obs_beauty_filter, kept for existing scenes).
  *
  * Per frame (once, even if OBS renders the source several times):
  *   1. render the filtered source into a texture
@@ -170,7 +170,7 @@ static float *slider_ptr(struct beauty_filter *f, const struct slider *s)
 
 static const char *beauty_get_name(void *unused)
 {
-	return obs_module_text("Beauty Enhance");
+	return obs_module_text("Dewy");
 }
 
 static void beauty_update(void *data, obs_data_t *settings)
@@ -215,7 +215,7 @@ static gs_effect_t *load_effect(const char *name)
 	}
 	bfree(src);
 	if (!e)
-		blog(LOG_ERROR, "[obs-beauty] failed to load %s: %s", path ? path : name, err ? err : "(unknown)");
+		blog(LOG_ERROR, "[dewy] failed to load %s: %s", path ? path : name, err ? err : "(unknown)");
 	bfree(err);
 	bfree(path);
 	return e;
@@ -987,7 +987,7 @@ static void beauty_render(void *data, gs_effect_t *unused)
 		if (id % 1800 == 0) {
 			float ms, det;
 			face_tracker_stats(f->tracker, &ms, &det);
-			blog(LOG_INFO, "[obs-beauty] %s: %.2f ms/frame, %.0f%% full detections, face %s, %.0f%% new frames",
+			blog(LOG_INFO, "[dewy] %s: %.2f ms/frame, %.0f%% full detections, face %s, %.0f%% new frames",
 			     face_tracker_backend_name(f->tracker), ms, det * 100.0f, f->face.present ? "present" : "absent",
 			     (double)(f->content_last - f->log_content) * 100.0 / 1800.0);
 			f->log_content = f->content_last;

@@ -17,7 +17,7 @@ struct FaceCrop {
 	bool hasFace = false;
 };
 
-/* Grabs the latest frame from a Beauty filter and crops around the face (falls back to an
+/* Grabs the latest frame from a Dewy filter and crops around the face (falls back to an
  * illustrated face when no camera frame or face is available). */
 FaceCrop captureFaceCrop(obs_source_t *filter, int size, float zoom = 2.1f);
 

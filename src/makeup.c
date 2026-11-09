@@ -54,7 +54,7 @@ void makeup_presets_load(void)
 		g_presets = obs_data_get_array(root, "presets");
 		obs_data_release(root);
 	}
-	blog(LOG_INFO, "[obs-beauty] %zu makeup presets loaded", g_presets ? obs_data_array_count(g_presets) : 0);
+	blog(LOG_INFO, "[dewy] %zu makeup presets loaded", g_presets ? obs_data_array_count(g_presets) : 0);
 	bfree(path);
 }
 
@@ -245,7 +245,7 @@ gs_texture_t *makeup_load_cube(const char *path, int *size_out)
 	*size_out = 0;
 	FILE *f = os_fopen(path, "r");
 	if (!f) {
-		blog(LOG_WARNING, "[obs-beauty] cannot open LUT %s", path);
+		blog(LOG_WARNING, "[dewy] cannot open LUT %s", path);
 		return NULL;
 	}
 	int n = 0, count = 0, total = 0;
@@ -284,7 +284,7 @@ gs_texture_t *makeup_load_cube(const char *path, int *size_out)
 		tex = gs_texture_create((uint32_t)(n * n), (uint32_t)n, GS_RGBA, 1, &data, 0);
 		*size_out = n;
 	} else {
-		blog(LOG_WARNING, "[obs-beauty] invalid LUT %s (%d of %d entries)", path, count, total);
+		blog(LOG_WARNING, "[dewy] invalid LUT %s (%d of %d entries)", path, count, total);
 	}
 	bfree(pixels);
 	return tex;

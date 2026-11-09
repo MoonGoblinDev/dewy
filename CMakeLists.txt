@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(obs-beauty VERSION 0.3.0 LANGUAGES C CXX)
+project(dewy VERSION 0.3.0 LANGUAGES C CXX)
 if(APPLE)
   enable_language(OBJC OBJCXX)
 endif()
@@ -104,7 +104,7 @@ if(TRUE)
 endif()
 
 # ---------------------------------------------------------------- the plugin
-add_library(obs-beauty MODULE
+add_library(dewy MODULE
   src/plugin-main.c
   src/beauty-filter.c
   src/face-geometry.c
@@ -121,31 +121,31 @@ add_library(obs-beauty MODULE
   src/dock/thumbs.cpp
 )
 if(BEAUTY_TRACKER STREQUAL "vision")
-  target_sources(obs-beauty PRIVATE src/tracker/backend-vision.mm)
-  target_compile_definitions(obs-beauty PRIVATE BEAUTY_TRACKER_VISION)
+  target_sources(dewy PRIVATE src/tracker/backend-vision.mm)
+  target_compile_definitions(dewy PRIVATE BEAUTY_TRACKER_VISION)
   set_source_files_properties(src/tracker/backend-vision.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 else()
-  target_sources(obs-beauty PRIVATE src/tracker/backend-onnx.cpp)
+  target_sources(dewy PRIVATE src/tracker/backend-onnx.cpp)
 endif()
-target_include_directories(obs-beauty PRIVATE "${ORT_INCLUDE}")
+target_include_directories(dewy PRIVATE "${ORT_INCLUDE}")
 
-target_include_directories(obs-beauty PRIVATE "${OBS_SRC}/libobs" "${OBS_GEN_DIR}" "${FRONTEND_DIR}" src src/tracker)
-target_compile_definitions(obs-beauty PRIVATE PLUGIN_VERSION="${PROJECT_VERSION}" BEAUTY_HAVE_LIBOBS)
+target_include_directories(dewy PRIVATE "${OBS_SRC}/libobs" "${OBS_GEN_DIR}" "${FRONTEND_DIR}" src src/tracker)
+target_compile_definitions(dewy PRIVATE PLUGIN_VERSION="${PROJECT_VERSION}" BEAUTY_HAVE_LIBOBS)
 
 if(MSVC)
-  target_compile_options(obs-beauty PRIVATE /utf-8 /W3 /wd4244 /wd4305 /wd4267 /permissive- $<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>)
-  target_compile_definitions(obs-beauty PRIVATE _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
+  target_compile_options(dewy PRIVATE /utf-8 /W3 /wd4244 /wd4305 /wd4267 /permissive- $<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>)
+  target_compile_definitions(dewy PRIVATE _USE_MATH_DEFINES NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
 else()
-  target_compile_options(obs-beauty PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+  target_compile_options(dewy PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
 endif()
 
 # ---------------------------------------------------------------- platform linking
 if(APPLE)
   set(OBS_APP "/Applications/OBS.app" CACHE PATH "Installed OBS.app to link against")
-  target_include_directories(obs-beauty PRIVATE "${SIMDE_DIR}")
-  target_compile_options(obs-beauty PRIVATE "$<$<COMPILE_LANGUAGE:CXX,OBJCXX>:SHELL:-iframework ${QT_DIR}/lib>")
-  target_link_options(obs-beauty PRIVATE "-F${OBS_APP}/Contents/Frameworks" "-Wl,-rpath,@executable_path/../Frameworks")
-  target_link_libraries(obs-beauty PRIVATE
+  target_include_directories(dewy PRIVATE "${SIMDE_DIR}")
+  target_compile_options(dewy PRIVATE "$<$<COMPILE_LANGUAGE:CXX,OBJCXX>:SHELL:-iframework ${QT_DIR}/lib>")
+  target_link_options(dewy PRIVATE "-F${OBS_APP}/Contents/Frameworks" "-Wl,-rpath,@executable_path/../Frameworks")
+  target_link_libraries(dewy PRIVATE
     "-framework libobs" "${OBS_APP}/Contents/Frameworks/libobs-frontend-api.1.dylib"
     "-framework QtWidgets" "-framework QtGui" "-framework QtCore"
     "-framework Foundation" "-framework CoreVideo" "-framework CoreGraphics" "-framework Vision")
@@ -177,13 +177,13 @@ elseif(WIN32)
       endif()
     endif()
   endforeach()
-  target_include_directories(obs-beauty PRIVATE "${OBS_SRC}/deps/w32-pthreads" "${QT_DIR}/include"
+  target_include_directories(dewy PRIVATE "${OBS_SRC}/deps/w32-pthreads" "${QT_DIR}/include"
                              "${QT_DIR}/include/QtCore" "${QT_DIR}/include/QtGui" "${QT_DIR}/include/QtWidgets")
-  target_compile_definitions(obs-beauty PRIVATE QT_NO_DEBUG)
-  target_link_libraries(obs-beauty PRIVATE
+  target_compile_definitions(dewy PRIVATE QT_NO_DEBUG)
+  target_link_libraries(dewy PRIVATE
     "${IMPLIB_DIR}/obs.lib" "${IMPLIB_DIR}/obs-frontend-api.lib" "${IMPLIB_DIR}/w32-pthreads.lib"
     "${QT_DIR}/lib/Qt6Widgets.lib" "${QT_DIR}/lib/Qt6Gui.lib" "${QT_DIR}/lib/Qt6Core.lib")
-  set_target_properties(obs-beauty PROPERTIES PREFIX "" MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+  set_target_properties(dewy PROPERTIES PREFIX "" MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 endif()
 
 # ---------------------------------------------------------------- data + packaging
@@ -196,37 +196,37 @@ list(FILTER PLUGIN_DATA EXCLUDE REGEX "README\\.md$")
 if(APPLE)
   foreach(f IN LISTS PLUGIN_DATA)
     get_filename_component(dir "${f}" DIRECTORY)
-    target_sources(obs-beauty PRIVATE "data/${f}")
+    target_sources(dewy PRIVATE "data/${f}")
     set_source_files_properties("data/${f}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/${dir}")
   endforeach()
-  target_sources(obs-beauty PRIVATE "${ORT_RUNTIME}")
+  target_sources(dewy PRIVATE "${ORT_RUNTIME}")
   set_source_files_properties("${ORT_RUNTIME}" PROPERTIES MACOSX_PACKAGE_LOCATION "Frameworks")
   get_filename_component(ORT_NAME "${ORT_RUNTIME}" NAME)
-  target_compile_definitions(obs-beauty PRIVATE BEAUTY_ORT_FILE="${ORT_NAME}")
-  set_target_properties(obs-beauty PROPERTIES
+  target_compile_definitions(dewy PRIVATE BEAUTY_ORT_FILE="${ORT_NAME}")
+  set_target_properties(dewy PROPERTIES
     BUNDLE TRUE BUNDLE_EXTENSION plugin PREFIX ""
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "id.tunelab.obs-beauty"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "id.tunelab.dewy"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
   set(OBS_USER_PLUGINS "$ENV{HOME}/Library/Application Support/obs-studio/plugins")
   add_custom_target(install-plugin
-    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${OBS_USER_PLUGINS}/obs-beauty.plugin"
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "$<TARGET_BUNDLE_DIR:obs-beauty>" "${OBS_USER_PLUGINS}/obs-beauty.plugin"
-    DEPENDS obs-beauty
-    COMMENT "Installing obs-beauty.plugin into ${OBS_USER_PLUGINS}")
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${OBS_USER_PLUGINS}/dewy.plugin"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "$<TARGET_BUNDLE_DIR:dewy>" "${OBS_USER_PLUGINS}/dewy.plugin"
+    DEPENDS dewy
+    COMMENT "Installing dewy.plugin into ${OBS_USER_PLUGINS}")
 elseif(WIN32)
-  # Layout matches an OBS install: obs-plugins/64bit/*.dll + data/obs-plugins/obs-beauty/*
-  target_compile_definitions(obs-beauty PRIVATE BEAUTY_ORT_FILE="obs-beauty-onnxruntime.dll")
-  install(TARGETS obs-beauty LIBRARY DESTINATION obs-plugins/64bit RUNTIME DESTINATION obs-plugins/64bit)
-  install(FILES "${ORT_RUNTIME}" DESTINATION obs-plugins/64bit RENAME obs-beauty-onnxruntime.dll)
+  # Layout matches an OBS install: obs-plugins/64bit/*.dll + data/obs-plugins/dewy/*
+  target_compile_definitions(dewy PRIVATE BEAUTY_ORT_FILE="dewy-onnxruntime.dll")
+  install(TARGETS dewy LIBRARY DESTINATION obs-plugins/64bit RUNTIME DESTINATION obs-plugins/64bit)
+  install(FILES "${ORT_RUNTIME}" DESTINATION obs-plugins/64bit RENAME dewy-onnxruntime.dll)
   install(FILES "${DML_DIR}/bin/x64-win/DirectML.dll" DESTINATION obs-plugins/64bit)
   foreach(f IN LISTS PLUGIN_DATA)
     get_filename_component(dir "${f}" DIRECTORY)
-    install(FILES "data/${f}" DESTINATION "data/obs-plugins/obs-beauty/${dir}")
+    install(FILES "data/${f}" DESTINATION "data/obs-plugins/dewy/${dir}")
   endforeach()
   set(CPACK_GENERATOR ZIP)
-  set(CPACK_PACKAGE_FILE_NAME "obs-beauty-${PROJECT_VERSION}-windows-x64")
+  set(CPACK_PACKAGE_FILE_NAME "dewy-${PROJECT_VERSION}-windows-x64")
   set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
   include(CPack)
 endif()

@@ -1,6 +1,7 @@
-# obs-beauty
+# Dewy
 
-A live-streaming apps–style beauty filter that runs natively inside OBS (no virtual camera).
+Real-time beauty for OBS: a live-streaming apps–style beauty filter that runs natively inside OBS
+(no virtual camera).
 It covers skin smoothing, foundation, dark-circle and smile-line removal, teeth whitening,
 bright eyes and clarity, plus landmark-driven face, eye, nose, mouth and brow reshaping.
 
@@ -36,11 +37,11 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_OSX_ARCHITECTURES=
 cmake --build build --target install-plugin   # copies into ~/Library/Application Support/obs-studio/plugins
 ```
 
-Restart OBS. The **Beauty** dock opens the first time (later: Docks → Beauty). Pick your camera in the dock and press **Add Beauty to this source**, or add the **Beauty Enhance** filter from the Filters window.
+Restart OBS. The **Dewy** dock opens the first time (later: Docks → Dewy). Pick your camera in the dock and press **Add Dewy to this source**, or add the **Dewy** filter from the Filters window.
 
 The first configure downloads the OBS 33.0.0 headers, SIMDe and OBS's Qt 6.11 headers (obs-deps) into `.deps/`. The dock links against the Qt frameworks inside OBS.app and needs no moc (no `Q_OBJECT`).
 
-Dev aid: create `~/Library/Application Support/obs-studio/plugin_config/obs-beauty/snapshot/` and restart OBS; the dock renders every tab into PNGs there.
+Dev aid: create `~/Library/Application Support/obs-studio/plugin_config/dewy/snapshot/` and restart OBS; the dock renders every tab into PNGs there.
 
 ## Build & install (Windows x64)
 
@@ -54,10 +55,10 @@ cpack --config build/CPackConfig.cmake -C Release -B dist
 
 The first configure downloads the OBS 33.0.0 release (its DLLs are turned into import libraries
 with `dumpbin`/`lib`), OBS's Qt 6.11 package, ONNX Runtime DirectML 1.24.4, DirectML 1.15.4 and the
-models. Unzip `dist/obs-beauty-<version>-windows-x64.zip` into your OBS folder
+models. Unzip `dist/dewy-<version>-windows-x64.zip` into your OBS folder
 (`C:\Program Files\obs-studio`) so its `obs-plugins` and `data` folders merge, then restart OBS.
 
-ONNX Runtime ships renamed (`obs-beauty-onnxruntime.dll`) and is loaded by full path, so it can't
+ONNX Runtime ships renamed (`dewy-onnxruntime.dll`) and is loaded by full path, so it can't
 clash with another plugin's `onnxruntime.dll`. GitHub Actions (`.github/workflows/build.yml`)
 builds both platforms.
 

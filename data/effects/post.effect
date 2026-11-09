@@ -1,4 +1,4 @@
-// obs-beauty post pass: Motion (camera-style moves) + Atmosphere (procedural particle
+// Dewy post pass: Motion (camera-style moves) + Atmosphere (procedural particle
 // ambience), plus small helper techniques for drawing sticker sprites.
 
 uniform float4x4 ViewProj;

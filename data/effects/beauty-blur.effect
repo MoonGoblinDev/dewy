@@ -1,4 +1,4 @@
-// Helper passes for obs-beauty: downscale, separable bilateral (skin smoothing) and
+// Helper passes for Dewy: downscale, separable bilateral (skin smoothing) and
 // separable gaussian (low-frequency "tone" used by foundation / shadow removal).
 
 uniform float4x4 ViewProj;

@@ -32,9 +32,9 @@ void ort_log(const char *fmt, const std::string &arg)
 	char msg[512];
 	snprintf(msg, sizeof(msg), fmt, arg.c_str());
 #ifdef BEAUTY_HAVE_LIBOBS
-	blog(LOG_INFO, "[obs-beauty] %s", msg);
+	blog(LOG_INFO, "[dewy] %s", msg);
 #else
-	fprintf(stderr, "[obs-beauty] %s\n", msg);
+	fprintf(stderr, "[dewy] %s\n", msg);
 #endif
 }
 
@@ -82,7 +82,7 @@ bool ort_load()
 
 Ort::Env &ort_env()
 {
-	static Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "obs-beauty");
+	static Ort::Env env(ORT_LOGGING_LEVEL_ERROR, "dewy");
 	return env;
 }
 

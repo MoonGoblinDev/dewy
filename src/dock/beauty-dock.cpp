@@ -1,5 +1,5 @@
 /*
- * "Beauty" dock: a streaming-app-style control panel for the Beauty Enhance filter.
+ * Dewy dock: a streaming-app-style control panel for the Dewy filter.
  * Edits go straight into the filter's settings (obs_source_update), and the dock listens to
  * the filter's "update" signal so changes made elsewhere (Filters window, websocket) show up.
  */
@@ -434,7 +434,7 @@ BeautyDock::BeautyDock()
 	emptyLabel->setWordWrap(true);
 	emptyLabel->setAlignment(Qt::AlignHCenter);
 	emptyLabel->setProperty("role", "sub");
-	addButton = new QPushButton(QStringLiteral("Add Beauty to this source"), emptyState);
+	addButton = new QPushButton(QStringLiteral("Add Dewy to this source"), emptyState);
 	addButton->setProperty("role", "primary");
 	addButton->setCursor(Qt::PointingHandCursor);
 	el->addWidget(art);
@@ -448,7 +448,7 @@ BeautyDock::BeautyDock()
 		obs_source_t *src = obs_get_source_by_name(name.toUtf8().constData());
 		if (!src)
 			return;
-		obs_source_t *f = obs_source_create(FILTER_ID, obs_module_text("Beauty Enhance"), nullptr, nullptr);
+		obs_source_t *f = obs_source_create(FILTER_ID, obs_module_text("Dewy"), nullptr, nullptr);
 		obs_source_filter_add(src, f);
 		obs_source_release(f);
 		obs_source_release(src);
@@ -483,7 +483,7 @@ QWidget *BeautyDock::buildHeader()
 
 	auto *row = new QHBoxLayout();
 	row->setSpacing(8);
-	auto *title = new QLabel(QStringLiteral("Beauty"), w);
+	auto *title = new QLabel(QStringLiteral("Dewy"), w);
 	title->setStyleSheet("font-size:17px; font-weight:700;");
 	row->addWidget(title);
 	row->addStretch(1);
@@ -1282,7 +1282,7 @@ void BeautyDock::bindToSelection()
 	if (!src)
 		emptyLabel->setText(QStringLiteral("Add a camera source to your scene, then pick it above."));
 	else
-		emptyLabel->setText(QStringLiteral("“%1” doesn't have Beauty yet.").arg(name));
+		emptyLabel->setText(QStringLiteral("“%1” doesn't have Dewy yet.").arg(name));
 	addButton->setVisible(src != nullptr);
 	refresh();
 	refreshThumbs();
@@ -1447,6 +1447,6 @@ void BeautyDock::snapshotIfRequested()
 extern "C" void beauty_dock_register(void)
 {
 	auto *dock = new BeautyDock();
-	if (!obs_frontend_add_dock_by_id("obs-beauty-dock", obs_module_text("Beauty"), dock))
+	if (!obs_frontend_add_dock_by_id("obs-beauty-dock", obs_module_text("Dewy"), dock) /* id kept: saved dock layouts */)
 		delete dock;
 }

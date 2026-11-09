@@ -53,7 +53,7 @@ static gs_effect_t *load_effect_src(const char *name)
 		e = gs_effect_create(src, unique, &err);
 	}
 	if (!e)
-		blog(LOG_ERROR, "[obs-beauty] failed to load %s: %s", name, err ? err : "(missing)");
+		blog(LOG_ERROR, "[dewy] failed to load %s: %s", name, err ? err : "(missing)");
 	bfree(err);
 	bfree(src);
 	bfree(path);
@@ -150,7 +150,7 @@ void fx_layers_update(struct fx_layers *fx, obs_data_t *s)
 				if (path)
 					fx->sprite_tex[i] = gs_texture_create_from_file(path);
 				if (!fx->sprite_tex[i])
-					blog(LOG_WARNING, "[obs-beauty] sticker not found: %s", rel);
+					blog(LOG_WARNING, "[dewy] sticker not found: %s", rel);
 				bfree(path);
 			}
 		}

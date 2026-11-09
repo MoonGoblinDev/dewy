@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tiny obs-websocket v5 client for developing obs-beauty.
+"""Tiny obs-websocket v5 client for developing Dewy.
 
 Reads the password from OBS's own obs-websocket config, so nothing secret is passed on the
 command line.

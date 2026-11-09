@@ -1,4 +1,4 @@
-// Custom-painted widgets for the Beauty dock. No Q_OBJECT anywhere (callbacks are
+// Custom-painted widgets for the Dewy dock. No Q_OBJECT anywhere (callbacks are
 // std::function), so the plugin builds without moc.
 #pragma once
 

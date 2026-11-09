@@ -1,4 +1,4 @@
-// obs-beauty final composite: face warp -> skin mask -> smoothing / foundation /
+// Dewy final composite: face warp -> skin mask -> smoothing / foundation /
 // shadow & fold removal / teeth / bright eyes / clarity.
 
 uniform float4x4 ViewProj;

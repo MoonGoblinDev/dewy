@@ -25,7 +25,7 @@ jobs:
         run: cpack --config build/CPackConfig.cmake -C Release -B dist
       - uses: actions/upload-artifact@v4
         with:
-          name: obs-beauty-windows-x64
+          name: dewy-windows-x64
           path: dist/*.zip
 
   macos:
@@ -44,8 +44,8 @@ jobs:
       - name: Build
         run: cmake --build build
       - name: Package
-        run: cd build && zip -qry ../obs-beauty-macos-arm64.zip obs-beauty.plugin
+        run: cd build && zip -qry ../dewy-macos-arm64.zip dewy.plugin
       - uses: actions/upload-artifact@v4
         with:
-          name: obs-beauty-macos-arm64
-          path: obs-beauty-macos-arm64.zip
+          name: dewy-macos-arm64
+          path: dewy-macos-arm64.zip
