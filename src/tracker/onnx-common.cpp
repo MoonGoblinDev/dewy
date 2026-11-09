@@ -105,6 +105,10 @@ OrtModel ort_model(const std::string &path, bool prefer_accel)
 	auto build = [&](bool accel) {
 		Ort::SessionOptions so;
 		so.SetIntraOpNumThreads(2);
+		/* ORT's workers busy-spin between runs by default: ~85% of a core wasted for a model
+		 * that runs a few times a second. Sleep instead. */
+		so.AddConfigEntry("session.intra_op.allow_spinning", "0");
+		so.AddConfigEntry("session.inter_op.allow_spinning", "0");
 		so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 		bool on = false;
 		if (accel) {

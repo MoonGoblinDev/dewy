@@ -187,6 +187,7 @@ struct face_tracker {
 	PigmentBasis pigment = pigment_prior_basis();
 	bool pigment_calibrated = false;
 	uint64_t pigment_next_ns = 0;
+	uint64_t seg_last_ns = 0;
 
 	void smooth(ft_face &f, uint64_t ts);
 	void run_landmarks();
@@ -428,9 +429,12 @@ static bool queue_frame(Worker &w, const uint8_t *data, uint32_t linesize, uint3
 extern "C" bool face_tracker_submit_bgra(face_tracker_t *t, const uint8_t *data, uint32_t linesize, uint32_t width,
 					 uint32_t height, uint64_t frame_id, uint64_t timestamp_ns)
 {
-	/* segmentation every other frame on its own thread, never blocking landmarks */
-	if (t->seg_enabled.load())
-		queue_frame(t->seg, data, linesize, width, height, frame_id, timestamp_ns);
+	/* segmentation on its own thread, never blocking landmarks, at most ~15 Hz: the mask is
+	 * smoothed over time anyway and edges are snapped to every frame on the GPU */
+	const uint64_t SEG_INTERVAL_NS = 66000000ULL;
+	if (t->seg_enabled.load() && timestamp_ns - t->seg_last_ns >= SEG_INTERVAL_NS &&
+	    queue_frame(t->seg, data, linesize, width, height, frame_id, timestamp_ns))
+		t->seg_last_ns = timestamp_ns;
 	return queue_frame(t->lm, data, linesize, width, height, frame_id, timestamp_ns);
 }
 

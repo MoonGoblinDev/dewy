@@ -80,6 +80,17 @@ struct beauty_filter {
 	/* segmentation mask (R skin, G face skin, B hair, A person) */
 	gs_texrender_t *tr_seg_ref, *tr_skin_q, *tr_skin_e, *tr_skin_t, *tr_skin_tone;
 	gs_texrender_t *tr_tone_pb;
+
+	/* Duplicate-frame detection: OBS renders at its own rate (e.g. 60 fps) while a camera may
+	 * deliver fewer new frames (e.g. 30). The tracker works in content ids, which advance only
+	 * on a new frame, so repeats are neither analysed nor waited for and get their original's
+	 * landmarks exactly. */
+#define DUP_GRID 48
+	uint32_t dup_sig[DUP_GRID * DUP_GRID];
+	bool dup_have;
+	uint64_t content_last, fresh_ns, log_content;
+#define CMAP_N 16
+	uint64_t cmap_frame[CMAP_N], cmap_content[CMAP_N];
 	gs_texture_t *person_tex;
 	gs_texrender_t *tr_pm1, *tr_pm2;
 	uint32_t pm_w, pm_h;
@@ -434,6 +445,41 @@ static gs_texture_t *guided_pass(struct beauty_filter *f, gs_texrender_t *tr, co
 	return gs_texrender_get_texture(tr);
 }
 
+/* Compare a sparse grid of the staged frame with the last new one. Any real camera frame
+ * differs somewhere (sensor noise); an exact match is a repeat of the same frame. */
+static bool is_duplicate(struct beauty_filter *f, const uint8_t *ptr, uint32_t linesize, uint32_t sw, uint32_t sh)
+{
+	bool same = f->dup_have;
+	for (uint32_t gy = 0; gy < DUP_GRID; gy++) {
+		const uint8_t *row = ptr + (size_t)(gy * (sh - 1) / (DUP_GRID - 1)) * linesize;
+		for (uint32_t gx = 0; gx < DUP_GRID; gx++) {
+			uint32_t v;
+			memcpy(&v, row + (size_t)(gx * (sw - 1) / (DUP_GRID - 1)) * 4, 4);
+			uint32_t *s = &f->dup_sig[gy * DUP_GRID + gx];
+			if (*s != v) {
+				same = false;
+				*s = v;
+			}
+		}
+	}
+	f->dup_have = true;
+	return same;
+}
+
+static void cmap_put(struct beauty_filter *f, uint64_t frame, uint64_t content)
+{
+	f->cmap_frame[frame % CMAP_N] = frame;
+	f->cmap_content[frame % CMAP_N] = content;
+}
+
+/* Content id of a rendered frame. Frames not read back yet (no sync mode) are assumed new. */
+static uint64_t cmap_get(const struct beauty_filter *f, uint64_t frame)
+{
+	if (f->cmap_frame[frame % CMAP_N] == frame && frame)
+		return f->cmap_content[frame % CMAP_N];
+	return f->content_last + 1;
+}
+
 static void update_tracking(struct beauty_filter *f, gs_texture_t *src, uint32_t w, uint32_t h, uint64_t id)
 {
 	float s = fminf(1.0f, TRACK_SHORT_SIDE / (float)(w < h ? w : h));
@@ -459,10 +505,19 @@ static void update_tracking(struct beauty_filter *f, gs_texture_t *src, uint32_t
 		uint8_t *ptr;
 		uint32_t linesize;
 		bool sent = false;
+		uint64_t cid = f->content_last;
 		if (gs_stagesurface_map(f->stage[prev], &ptr, &linesize)) {
-			sent = face_tracker_submit_bgra(f->tracker, ptr, linesize, sw, sh, f->stage_id[prev],
-							os_gettime_ns());
-			if (f->stage_id[prev] % 15 == 0) { /* ~4x a second is plenty for thumbnails */
+			/* a still source (image, paused video) is re-analysed 4x a second so the face stays
+			 * "present" */
+			uint64_t now = os_gettime_ns();
+			bool fresh = !is_duplicate(f, ptr, linesize, sw, sh) || now - f->fresh_ns > 250000000ULL;
+			if (fresh) {
+				f->fresh_ns = now;
+				cid = ++f->content_last;
+				sent = face_tracker_submit_bgra(f->tracker, ptr, linesize, sw, sh, cid, now);
+			}
+			cmap_put(f, f->stage_id[prev], cid);
+			if (fresh && f->stage_id[prev] % 15 == 0) { /* ~4x a second is plenty for thumbnails */
 				pthread_mutex_lock(&f->snap_mutex);
 				if (f->snap_w != sw || f->snap_h != sh) {
 					bfree(f->snap);
@@ -472,14 +527,14 @@ static void update_tracking(struct beauty_filter *f, gs_texture_t *src, uint32_t
 				}
 				for (uint32_t y = 0; y < sh; y++)
 					memcpy(f->snap + (size_t)y * sw * 4, ptr + (size_t)y * linesize, (size_t)sw * 4);
-				f->snap_id = f->stage_id[prev];
+				f->snap_id = cid;
 				pthread_mutex_unlock(&f->snap_mutex);
 			}
 			gs_stagesurface_unmap(f->stage[prev]);
 		}
 		f->staged[prev] = false;
 		if (sent && f->sync_tracking)
-			face_tracker_wait(f->tracker, f->stage_id[prev], 4.0f);
+			face_tracker_wait(f->tracker, cid, 4.0f);
 	}
 
 	gs_texture_t *small = blur_pass(f, f->tr_small, "Draw", src, w, h, sw, sh, 0, 0, 0, 0);
@@ -679,7 +734,7 @@ static void process_frame(struct beauty_filter *f, gs_texture_t *src, uint32_t w
 	float dt = f->last_ns ? (float)((double)(now - f->last_ns) / 1e9) : 0.0f;
 	f->last_ns = now;
 
-	bool have = face_tracker_get_at(f->tracker, id, &f->face);
+	bool have = face_tracker_get_at(f->tracker, cmap_get(f, id), &f->face);
 	float target = f->face.present ? 1.0f : 0.0f;
 	f->face_weight += (target - f->face_weight) * fminf(1.0f, dt * 6.0f);
 	struct beauty_shape shape = f->shape;
@@ -932,8 +987,10 @@ static void beauty_render(void *data, gs_effect_t *unused)
 		if (id % 1800 == 0) {
 			float ms, det;
 			face_tracker_stats(f->tracker, &ms, &det);
-			blog(LOG_INFO, "[obs-beauty] %s: %.2f ms/frame, %.0f%% full detections, face %s",
-			     face_tracker_backend_name(f->tracker), ms, det * 100.0f, f->face.present ? "present" : "absent");
+			blog(LOG_INFO, "[obs-beauty] %s: %.2f ms/frame, %.0f%% full detections, face %s, %.0f%% new frames",
+			     face_tracker_backend_name(f->tracker), ms, det * 100.0f, f->face.present ? "present" : "absent",
+			     (double)(f->content_last - f->log_content) * 100.0 / 1800.0);
+			f->log_content = f->content_last;
 		}
 	}
 
