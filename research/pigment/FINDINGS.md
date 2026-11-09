@@ -95,3 +95,14 @@ the final effect had grown to 13, which corrupted the GL backend's texture/sampl
 (per-frame GL errors and stale masks sampled after a source change). The final effect is now
 held at 8: shared masks are bound once, skin colour and pigment share one skin-weighted OD
 texture, the body height field lives in tone's alpha, and the Filters LUT is its own pass.
+
+## Blush
+
+Blush is applied in optical density too, as powder that both scatters and absorbs: 65 % moves
+the cheek's colour (chromatic plane, relative to the surrounding skin) towards the blush
+colour, 35 % adds the colour as a thin absorbing film. Colour-only turned pastels mauve on
+darker skin; film-only turned every pink sunburn-red. Brightness (shading) isn't touched, the
+skin's texture shows through, shine and pixels much darker than the skin (glasses frames,
+stubble) are left alone. Over the whole skin: structure corr ≥ 0.997, shadow depth
+0.998 – 1.004 at full strength; at preset strength the colour change matches the old paint blush.
+

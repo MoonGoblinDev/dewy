@@ -21,7 +21,7 @@ bright eyes and clarity, plus landmark-driven face, eye, nose, mouth and brow re
   melanin + hemoglobin + shading; the two pigment directions are calibrated on the user's own
   skin every 2 s (2-D ICA, clamped to physical priors). Skin tone changes melanin, Foundation
   evens melanin/hemoglobin blotches within the colour plane plus a little exposure, Redness
-  removes excess hemoglobin. Shading (light, shadows, the 3-D form) is never written, so
+  removes excess hemoglobin, and Blush tints the cheeks the same way. Shading (light, shadows, the 3-D form) is never written, so
   shadow depth stays at 0.98–1.02 of the original (see
   [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md)).
 - Everything else runs as GPU shaders in OBS's render pipeline (`data/effects/`).

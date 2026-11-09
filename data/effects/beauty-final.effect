@@ -359,12 +359,30 @@ float4 PSMain(VertData v_in) : TARGET
 		float hm = hl * skin_lo * makeup_extra.z * amt * fw;
 		col = 1.0 - (1.0 - col) * (1.0 - float3(1.0, 0.97, 0.92) * 0.30 * hm * hm * (3.0 - 2.0 * hm));
 
-		// blush
-		float blush = max(region(sp, 12, 1.0), region(sp, 13, 1.0)) * skin_lo * blush_color.a * amt * fw;
-		float cy = luma(col);
-		float3 bl_tint = blush_color.rgb * (cy / max(luma(blush_color.rgb), 0.1));
-		float3 bl = lerp(bl_tint, soft_light(col, blush_color.rgb), 0.3);
-		col = lerp(col, saturate(bl), saturate(blush * 1.05));
+		// blush: in optical density, move the cheek's colour (the chromatic plane, relative to
+		// the surrounding skin) towards the blush colour. Brightness - shading, shadows, the
+		// 3-D form - and the skin's own texture stay; shine is never tinted.
+		// a soft wash a little wider than the cheek ellipse; never on things much darker than
+		// the surrounding skin (glasses frames, stubble, hair)
+		float blush = max(region_scaled(sp, 12, 1.0, 1.3), region_scaled(sp, 13, 1.0, 1.3)) * skin_lo *
+			      blush_color.a * amt * fw * (1.0 - smoothstep(0.15, 0.30, ts.x - luma(col)));
+		if (blush > 0.0) {
+			float3 U3 = float3(0.57735027, 0.57735027, 0.57735027);
+			float3 lin = srgb2lin(col);
+			float3 od = -log(max(lin, 0.001));
+			float3 od_ref = has_sod ? od_low : od;
+			float3 od_bl = -log(max(srgb2lin(blush_color.rgb), 0.001));
+			// Powder blush both scatters (the cheek takes the blush's colour) and absorbs (a thin
+			// tinted film over the skin). Colour-only would turn pastels mauve on darker skin,
+			// film-only turns every pink sunburn-red; 65/35 reads as a natural rose.
+			float3 bl_c = od_bl - dot(od_bl, U3) * U3;
+			float3 d = 0.65 * (bl_c - (od_ref - dot(od_ref, U3) * U3)) +
+				   0.35 * 0.53 * (bl_c + 0.15 * dot(od_bl, U3) * U3);
+			float ll = dot(lin, float3(0.2126, 0.7152, 0.0722));
+			float lsat = max(lin.r, max(lin.g, lin.b)) - min(lin.r, min(lin.g, lin.b));
+			float keep = 1.0 - saturate((ll - 0.45) / 0.25) * saturate(1.0 - lsat / max(ll, 0.001) / 0.35);
+			col = lin2srgb(exp(-(od + d * (1.05 * saturate(blush) * keep))));
+		}
 
 		// eyeshadow (kept off the eyeball and the brows)
 		float sh = max(region(sp, 14, 0.9), region(sp, 15, 0.9)) * (1.0 - saturate(mk.b * 1.5)) *
