@@ -6,7 +6,7 @@ command line.
 
   obsctl.py inputs                                  list inputs (sources)
   obsctl.py filters <source>                        list filters on a source
-  obsctl.py add <source> [name]                     add the Beauty Enhance filter
+  obsctl.py add <source> [name]                     add the Dewy filter     
   obsctl.py set <source> key=value ... [--filter name]   change filter settings
   obsctl.py enable <source> on|off [--filter name]  toggle the filter
   obsctl.py shot <source> <out.png> [width] [--frames N]  screenshot a source (with filters)
@@ -62,7 +62,7 @@ async def main(argv):
     if not argv:
         print(__doc__)
         return
-    filt = "Beauty Enhance"
+    filt = "Dewy"
     frames = 1
     if "--frames" in argv:
         i = argv.index("--frames")
