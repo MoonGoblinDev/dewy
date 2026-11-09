@@ -4,3 +4,5 @@
 /data/models/*.onnx
 .DS_Store
 __pycache__/
+/research/pigment/frames/
+/research/pigment/out/
