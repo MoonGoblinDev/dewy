@@ -8,6 +8,7 @@
 //   * cheek skin-colour sampling for the adaptive skin mask
 //   * temporal smoothing of the person mask
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -20,6 +21,7 @@
 
 #include "backend.hpp"
 #include "segmenter.hpp"
+#include "pigment-calib.hpp"
 #include "face-tracker.h"
 
 #ifndef M_PI
@@ -181,6 +183,11 @@ struct face_tracker {
 	uint32_t mask_w = 0, mask_h = 0;
 	uint64_t mask_serial = 0;
 
+	/* skin pigment basis (melanin / hemoglobin), recalibrated every ~2 s */
+	PigmentBasis pigment = pigment_prior_basis();
+	bool pigment_calibrated = false;
+	uint64_t pigment_next_ns = 0;
+
 	void smooth(ft_face &f, uint64_t ts);
 	void run_landmarks();
 	void run_segmentation();
@@ -336,6 +343,19 @@ void face_tracker::run_segmentation()
 			}
 			mask_serial++;
 		}
+		/* pigment calibration from confident skin pixels of this frame */
+		if (ok && (int)m.size() == mw * mh * 4 && now_ns() >= pigment_next_ns) {
+			PigmentBasis b;
+			if (pigment_calibrate(seg.buf.data(), seg.w, seg.h, seg.w * 4, m.data(), mw, mh, b)) {
+				std::lock_guard<std::mutex> g(mask_m);
+				if (pigment_calibrated)
+					pigment_blend(pigment, b, 0.3f);
+				else
+					pigment = b;
+				pigment_calibrated = true;
+			}
+			pigment_next_ns = now_ns() + 2000000000ULL;
+		}
 		seg.busy = false;
 	}
 }
@@ -486,4 +506,25 @@ extern "C" void face_tracker_stats(face_tracker_t *t, float *mean_ms, float *det
 	std::lock_guard<std::mutex> g(t->res_m);
 	*mean_ms = t->mean_ms;
 	*detect_ratio = t->detect_ratio;
+}
+
+extern "C" bool face_tracker_get_pigment(face_tracker_t *t, ft_pigment *out)
+{
+	if (!t) {
+		PigmentBasis b = pigment_prior_basis();
+		std::copy(b.mel, b.mel + 3, out->mel);
+		std::copy(b.hem, b.hem + 3, out->hem);
+		std::copy(b.inv, b.inv + 9, out->inv);
+		out->calibrated = false;
+		return false;
+	}
+	std::lock_guard<std::mutex> g(t->mask_m);
+	for (int i = 0; i < 3; i++) {
+		out->mel[i] = t->pigment.mel[i];
+		out->hem[i] = t->pigment.hem[i];
+	}
+	for (int i = 0; i < 9; i++)
+		out->inv[i] = t->pigment.inv[i];
+	out->calibrated = t->pigment_calibrated;
+	return true;
 }

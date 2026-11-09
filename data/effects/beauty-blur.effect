@@ -7,7 +7,7 @@ uniform float2 texel;      // 1 / source size
 uniform float2 dir;        // (1,0) horizontal, (0,1) vertical
 uniform float step_px;     // tap spacing in source pixels
 uniform float sigma_r;     // bilateral range sigma (RGB distance)
-uniform texture2d guide;   // Refine: the frame (half res) / SkinPremul: refined mask
+uniform texture2d guide;   // Refine: the frame (half res) / SkinOD: refined mask / WithAlpha: alpha source
 
 sampler_state linearClamp {
 	Filter    = Linear;
@@ -93,13 +93,33 @@ float4 PSRefine(VertData v_in) : TARGET
 	return acc / wsum;
 }
 
-// Skin-weighted colour for normalised convolution: rgb * skin, skin.
-float4 PSSkinPremul(VertData v_in) : TARGET
+float3 srgb_to_lin(float3 c)
+{
+	// component-wise select written with lerp/step (vector ?: doesn't translate to GLSL)
+	return lerp(pow((c + 0.055) / 1.055, float3(2.4, 2.4, 2.4)), c / 12.92, step(c, float3(0.04045, 0.04045, 0.04045)));
+}
+
+// Skin-weighted optical density (OD = -log linear RGB), premultiplied, for normalised
+// convolution: its local average gives both the surrounding skin colour (exp(-OD)) and,
+// projected on the pigment basis, the local melanin / hemoglobin. Clipped, very dark and
+// shiny pixels don't count - they carry no pigment information.
+float4 PSSkinOD(VertData v_in) : TARGET
 {
 	float3 c = image.Sample(linearClamp, v_in.uv).rgb;
-	float s = guide.Sample(linearClamp, v_in.uv).r;
-	return float4(c * s, s);
+	float3 od = -log(max(srgb_to_lin(saturate(c)), float3(0.001, 0.001, 0.001)));
+	float w = guide.Sample(linearClamp, v_in.uv).r;
+	float mx = max(c.r, max(c.g, c.b));
+	float mn = min(c.r, min(c.g, c.b));
+	w *= step(mx, 0.97) * step(0.05, mx) * (1.0 - step(0.75, mx) * step(mx - mn, 0.25 * mx));
+	return float4(od * w, w);
 }
+
+// rgb from image, alpha from guide (packs a second single-channel map into one texture).
+float4 PSWithAlpha(VertData v_in) : TARGET
+{
+	return float4(image.Sample(linearClamp, v_in.uv).rgb, guide.Sample(linearClamp, v_in.uv).a);
+}
+
 
 technique Refine
 {
@@ -110,14 +130,6 @@ technique Refine
 	}
 }
 
-technique SkinPremul
-{
-	pass
-	{
-		vertex_shader = VSDefault(v_in);
-		pixel_shader  = PSSkinPremul(v_in);
-	}
-}
 
 technique Draw
 {
@@ -143,5 +155,23 @@ technique Gauss
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSGauss(v_in);
+	}
+}
+
+technique SkinOD
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSkinOD(v_in);
+	}
+}
+
+technique WithAlpha
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSWithAlpha(v_in);
 	}
 }

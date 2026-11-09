@@ -113,6 +113,7 @@ static const std::vector<FeatureGroup> &categories()
 static const Opt SMOOTH{"smooth", "Smooth", {Base::Drop}, false, 50};
 static const Opt FOUNDATION{"foundation", "Foundation", {Base::Compact}, false, 20};
 static const Opt SKIN_TONE{"skin_tone", "Skin tone", {Base::SkinTone}, true, 0};
+static const Opt REDNESS{"redness", "Redness", {Base::Redness}, false, 0};
 static const std::vector<Opt> &tailSliders()
 {
 	static const std::vector<Opt> v = {
@@ -652,6 +653,7 @@ QWidget *BeautyDock::buildAppearance()
 	v->addWidget(sliderSection(SMOOTH));
 	v->addWidget(sliderSection(FOUNDATION));
 	v->addWidget(sliderSection(SKIN_TONE));
+	v->addWidget(sliderSection(REDNESS));
 	for (const FeatureGroup &c : categories())
 		v->addWidget(categorySection(c));
 	for (const Opt &o : tailSliders())
@@ -1307,6 +1309,7 @@ void BeautyDock::resetCurrentTab()
 		obs_data_set_int(d, SMOOTH.key, SMOOTH.def);
 		obs_data_set_int(d, FOUNDATION.key, FOUNDATION.def);
 		obs_data_set_int(d, SKIN_TONE.key, SKIN_TONE.def);
+		obs_data_set_int(d, REDNESS.key, REDNESS.def);
 		for (const FeatureGroup &c : categories())
 			for (const Opt &o : c.opts)
 				obs_data_set_int(d, o.key, o.def);

@@ -58,7 +58,7 @@ struct beauty_filter {
 	bool sync_tracking;
 
 	/* settings (0..1 or -1..1) */
-	float smooth, foundation, skin_tone, pouch, fold, teeth, eyelight, clarity;
+	float smooth, foundation, skin_tone, redness, pouch, fold, teeth, eyelight, clarity;
 	struct beauty_shape shape;
 	bool all_skin;
 	bool show_landmarks;
@@ -79,6 +79,7 @@ struct beauty_filter {
 
 	/* segmentation mask (R skin, G face skin, B hair, A person) */
 	gs_texrender_t *tr_seg_ref, *tr_skin_q, *tr_skin_e, *tr_skin_t, *tr_skin_tone;
+	gs_texrender_t *tr_tone_pb;
 	gs_texture_t *person_tex;
 	gs_texrender_t *tr_pm1, *tr_pm2;
 	uint32_t pm_w, pm_h;
@@ -108,6 +109,7 @@ static const struct slider sliders[] = {
 	{"smooth", "Smooth", G_SKIN, false, 50, SK(smooth)},
 	{"foundation", "Foundation", G_SKIN, false, 20, SK(foundation)},
 	{"skin_tone", "Skin tone", G_SKIN, true, 0, SK(skin_tone)},
+	{"redness", "Redness", G_SKIN, false, 0, SK(redness)},
 	{"shadows", "Shadows (dark circles)", G_SKIN, false, 0, SK(pouch)},
 	{"degree", "Degree (smile lines)", G_SKIN, false, 0, SK(fold)},
 	{"teeth", "Brighten teeth", G_SKIN, false, 0, SK(teeth)},
@@ -235,6 +237,7 @@ static void *beauty_create(obs_data_t *settings, obs_source_t *source)
 	f->tr_skin_e = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
 	f->tr_skin_t = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
 	f->tr_skin_tone = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
+	f->tr_tone_pb = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
 	f->tr_pm2 = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->data_tex = gs_texture_create(DATA_TEX_WIDTH, 1, GS_RGBA32F, 1, NULL, GS_DYNAMIC);
 	obs_leave_graphics();
@@ -265,6 +268,7 @@ static void beauty_destroy(void *data)
 	gs_texrender_destroy(f->tr_skin_e);
 	gs_texrender_destroy(f->tr_skin_t);
 	gs_texrender_destroy(f->tr_skin_tone);
+	gs_texrender_destroy(f->tr_tone_pb);
 	gs_texrender_destroy(f->tr_pm2);
 	gs_texture_destroy(f->person_tex);
 	fx_layers_destroy(f->fx);
@@ -508,7 +512,7 @@ static bool face_effects_active(const struct beauty_filter *f)
 	for (size_t i = 0; i < sizeof(f->shape) / sizeof(float); i++)
 		if (v[i] != 0.0f)
 			return true;
-	return f->smooth > 0 || f->foundation > 0 || f->skin_tone != 0; /* skin colour is sampled from the face */
+	return f->smooth > 0 || f->foundation > 0 || f->skin_tone != 0 || f->redness > 0; /* skin colour is sampled from the face */
 }
 
 /* ---------------- makeup mask rasterisation ---------------- */
@@ -723,21 +727,33 @@ static void process_frame(struct beauty_filter *f, gs_texture_t *src, uint32_t w
 		f->pm_cpu = segbuf; /* keep for thumbnails */
 		pthread_mutex_unlock(&f->snap_mutex);
 	}
-	gs_texture_t *seg = NULL, *skin_tone = NULL, *person_blur = NULL;
+	gs_texture_t *seg = NULL, *skin_od = NULL, *person_blur = NULL;
+	ft_pigment pig;
+	face_tracker_get_pigment(f->tracker, &pig); /* prior basis until calibrated */
 	if (f->person_tex) {
 		/* snap the 256px mask to the frame's real edges */
 		seg = guided_pass(f, f->tr_seg_ref, "Refine", f->person_tex, half, 1.0f / (float)f->pm_w,
 				  1.0f / (float)f->pm_h, hw, hh, 0.07f);
-		/* skin-only colour (normalised convolution): background never bleeds into skin tone */
-		gs_texture_t *sq = guided_pass(f, f->tr_skin_q, "SkinPremul", half, seg, 0, 0, qw, qh, 0);
+		/* skin-weighted optical density, blurred by normalised convolution: the local skin colour
+		 * and pigment levels that foundation / redness / shadows work towards (blotch scale ~ a
+		 * quarter of the eye distance). Background never bleeds into it. */
+		float ps = fmaxf(iod_half * 2.0f * 0.25f / 8.0f / 2.0f, 0.75f);
+		gs_texture_t *sq = guided_pass(f, f->tr_skin_q, "SkinOD", half, seg, 0, 0, qw, qh, 0);
 		gs_texture_t *se = blur_pass(f, f->tr_skin_e, "Draw", sq, qw, qh, ew, eh, 0, 0, 0, 0);
-		gs_texture_t *st = blur_pass(f, f->tr_skin_t, "Gauss", se, ew, eh, ew, eh, 1, 0, 2.0f, 0);
-		skin_tone = blur_pass(f, f->tr_skin_tone, "Gauss", st, ew, eh, ew, eh, 0, 1, 2.0f, 0);
+		gs_texture_t *st = blur_pass(f, f->tr_skin_t, "Gauss", se, ew, eh, ew, eh, 1, 0, ps, 0);
+		skin_od = blur_pass(f, f->tr_skin_tone, "Gauss", st, ew, eh, ew, eh, 0, 1, ps, 0);
 		/* soft body height field for whole-body light normals (alpha channel) */
 		float stp = fmaxf((float)f->pm_w * 0.012f, 1.0f);
 		gs_texture_t *b1 = blur_pass(f, f->tr_pm1, "Gauss", f->person_tex, f->pm_w, f->pm_h, f->pm_w, f->pm_h, 1,
 					     0, stp, 0);
 		person_blur = blur_pass(f, f->tr_pm2, "Gauss", b1, f->pm_w, f->pm_h, f->pm_w, f->pm_h, 0, 1, stp, 0);
+		/* packed into tone's alpha: the final effect is limited to 8 textures */
+		gs_texture_t *tp = person_blur ? guided_pass(f, f->tr_tone_pb, "WithAlpha", tone, person_blur, 0, 0, ew, eh, 0)
+					       : NULL;
+		if (tp)
+			tone = tp;
+		else
+			person_blur = NULL;
 	}
 
 	/* --- makeup masks (lips / eyeliner / eye interior), soft-edged --- */
@@ -812,14 +828,23 @@ static void process_frame(struct beauty_filter *f, gs_texture_t *src, uint32_t w
 #define P2(n) gs_effect_get_param_by_name(fe, n)
 	fx_layers_set_final_params(f->fx, fe, tone);
 	gs_effect_set_texture(P2("seg_tex"), seg ? seg : tone);
-	gs_effect_set_texture(P2("skin_tone_tex"), skin_tone ? skin_tone : tone);
+	gs_effect_set_texture(P2("skin_od_tex"), skin_od ? skin_od : tone);
 	gs_effect_set_float(P2("has_seg"), seg ? 1.0f : 0.0f);
-	gs_effect_set_texture(P2("prot_tex"), mask ? mask : tone);
 	gs_effect_set_float(P2("has_prot"), mask ? 1.0f : 0.0f);
 	{
+		struct vec3 v;
+		vec3_set(&v, pig.mel[0], pig.mel[1], pig.mel[2]);
+		gs_effect_set_vec3(P2("pig_mel"), &v);
+		vec3_set(&v, pig.hem[0], pig.hem[1], pig.hem[2]);
+		gs_effect_set_vec3(P2("pig_hem"), &v);
+		vec3_set(&v, pig.inv[0], pig.inv[1], pig.inv[2]);
+		gs_effect_set_vec3(P2("pig_r0"), &v);
+		vec3_set(&v, pig.inv[3], pig.inv[4], pig.inv[5]);
+		gs_effect_set_vec3(P2("pig_r1"), &v);
+		gs_effect_set_float(P2("redness_amt"), f->enhance_on ? f->redness : 0.0f);
+	}
+	{
 		bool hp = seg && person_blur;
-		gs_effect_set_texture(gs_effect_get_param_by_name(fe, "person_tex"), hp ? seg : tone);
-		gs_effect_set_texture(gs_effect_get_param_by_name(fe, "person_blur"), hp ? person_blur : tone);
 		struct vec2 pt;
 		vec2_set(&pt, hp ? 1.0f / (float)f->pm_w : 0.0f, hp ? 1.0f / (float)f->pm_h : 0.0f);
 #undef P2

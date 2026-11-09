@@ -115,6 +115,7 @@ add_library(obs-beauty MODULE
   src/tracker/tracker-core.cpp
   src/tracker/onnx-common.cpp
   src/tracker/segmenter.cpp
+  src/tracker/pigment-calib.cpp
   src/dock/beauty-dock.cpp
   src/dock/widgets.cpp
   src/dock/thumbs.cpp

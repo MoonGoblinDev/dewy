@@ -270,6 +270,15 @@ void paintIcon(QPainter &p, const QRectF &r, IconSpec s, const QColor &color)
 		p.drawEllipse(g.at(0.64, 0.5), r.width() * 0.20, r.height() * 0.20);
 		break;
 	}
+	case Base::Redness: { /* face with a calmed cheek: dots fading out */
+		faceOutline(g, false);
+		p.setBrush(color);
+		p.drawEllipse(g.at(0.36, 0.58), r.width() * 0.045, r.height() * 0.045);
+		p.setBrush(Qt::NoBrush);
+		p.drawEllipse(g.at(0.46, 0.66), r.width() * 0.035, r.height() * 0.035);
+		p.drawEllipse(g.at(0.62, 0.58), r.width() * 0.025, r.height() * 0.025);
+		break;
+	}
 	case Base::Wand: {
 		p.drawLine(g.at(0.22, 0.80), g.at(0.62, 0.40));
 		star(g, 0.72, 0.28, 0.16);

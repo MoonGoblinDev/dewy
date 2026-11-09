@@ -15,6 +15,9 @@ uniform float  atmo_amt;
 uniform float4 color_a;
 uniform float4 color_b;
 uniform float4 atmo_params;    // density, speed, size
+uniform texture2d filter_lut_tex; // Filters tab: (N*N) x N 3D LUT strip
+uniform float  filter_lut_size;
+uniform float  filter_lut_amt;
 
 sampler_state linearClamp {
 	Filter    = Linear;
@@ -38,6 +41,20 @@ VertData VSDefault(VertData v_in)
 float4 PSCopy(VertData v_in) : TARGET
 {
 	return image.Sample(linearClamp, v_in.uv);
+}
+
+// Filters tab: 3D LUT on the whole frame (runs first, before stickers and atmosphere).
+float4 PSFilterLut(VertData v_in) : TARGET
+{
+	float4 c = image.Sample(linearClamp, v_in.uv);
+	float n = filter_lut_size;
+	float b = saturate(c.b) * (n - 1.0);
+	float b0 = floor(b);
+	float b1 = min(b0 + 1.0, n - 1.0);
+	float2 rg = (saturate(c.rg) * (n - 1.0) + 0.5) / float2(n * n, n);
+	float3 c0 = filter_lut_tex.Sample(linearClamp, rg + float2(b0 / n, 0.0)).rgb;
+	float3 c1 = filter_lut_tex.Sample(linearClamp, rg + float2(b1 / n, 0.0)).rgb;
+	return float4(lerp(c.rgb, lerp(c0, c1, b - b0), filter_lut_amt), c.a);
 }
 
 float4 PSSprite(VertData v_in) : TARGET
@@ -333,5 +350,14 @@ technique Post
 	{
 		vertex_shader = VSDefault(v_in);
 		pixel_shader  = PSPost(v_in);
+	}
+}
+
+technique FilterLut
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSFilterLut(v_in);
 	}
 }

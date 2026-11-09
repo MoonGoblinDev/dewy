@@ -16,8 +16,14 @@ bright eyes and clarity, plus landmark-driven face, eye, nose, mouth and brow re
   The mask is snapped to the image's edges on the GPU (joint-bilateral upsampling); exact
   landmark outlines protect eyes, lips and brow hair. Retouching is frequency separation:
   base (shading + colour) / blemish band / fine grain. Smooth removes the blemish band and keeps
-  the grain; Foundation, Skin tone and Shadows only edit the base layer, identically for all
-  skin, so face, neck and hands always match.
+  the grain; Shadows fills the base layer.
+- Skin colour is edited as pigment, not painted. In optical density (−log linear RGB) skin is
+  melanin + hemoglobin + shading; the two pigment directions are calibrated on the user's own
+  skin every 2 s (2-D ICA, clamped to physical priors). Skin tone changes melanin, Foundation
+  evens melanin/hemoglobin blotches within the colour plane plus a little exposure, Redness
+  removes excess hemoglobin. Shading (light, shadows, the 3-D form) is never written, so
+  shadow depth stays at 0.98–1.02 of the original (see
+  [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md)).
 - Everything else runs as GPU shaders in OBS's render pipeline (`data/effects/`).
 - Research notes and the streaming-app slider → technique mapping: [docs/RESEARCH.md](docs/RESEARCH.md)
 

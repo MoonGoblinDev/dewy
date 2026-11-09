@@ -33,7 +33,7 @@ inline const QColor blue{0x2f, 0x7c, 0xf6};
 enum class Base {
 	Face, VFace, Eye, Nose, Mouth, Brow, Drop, Compact, UnderEye, Tooth, Contrast, Fold,
 	Lips, Blush, Shadow, Liner, Sculpt, Glow, Body, Arm, Neck, Leg, Palette,
-	Wand, Smiley, Ambience, Filters, Bulb, SkinTone
+	Wand, Smiley, Ambience, Filters, Bulb, SkinTone, Redness
 };
 enum class Mod {
 	None, In, Out, InTop, InBottom, UpDown, UpDownTop, UpDownBottom, Shrink, Rotate,

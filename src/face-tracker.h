@@ -77,6 +77,16 @@ void face_tracker_set_segmentation(face_tracker_t *ft, bool enabled);
  * NULL if nothing new. */
 uint8_t *face_tracker_take_mask(face_tracker_t *ft, uint64_t *serial, uint32_t *w, uint32_t *h);
 
+/* Skin pigment basis in optical density: melanin / hemoglobin unit directions and the inverse
+ * of [mel hem (1,1,1)/sqrt3] (row-major; row 0 gives melanin, row 1 hemoglobin). Physical
+ * priors until the first calibration from the user's own skin. */
+typedef struct {
+	bool calibrated;
+	float mel[3], hem[3];
+	float inv[9];
+} ft_pigment;
+bool face_tracker_get_pigment(face_tracker_t *ft, ft_pigment *out);
+
 /* Running stats for the log: mean analysis time (ms) and fraction of frames re-detected. */
 void face_tracker_stats(face_tracker_t *ft, float *mean_ms, float *detect_ratio);
 

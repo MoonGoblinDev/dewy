@@ -75,3 +75,23 @@ at 1.0 under warm light).
    later; new Redness; Blush (makeup) = hemoglobin.
 5. **Validate:** these metrics as an automated test on recorded frames (structure corr ≥ 0.98,
    shadow depth 0.95–1.05, zero change outside skin).
+
+## Port results (GPU, in OBS)
+
+Same frames through the plugin (1280×720 day, 960×540 night), measured on OBS's output:
+
+| | structure corr | shadow depth |
+|---|---|---|
+| tone +1 / −1 | 0.987 – 0.996 | 0.997 – 1.001 |
+| foundation 1.0 | 0.994 – 0.996 | 0.989 – 1.014 |
+| redness 1.0 | 0.996 – 0.999 | 0.978 – 0.994 |
+
+No pixel outside skin changes. Redness measures the hemoglobin excess on the pixel minus its
+1–2 px grain: half-rectifying per-pixel sensor noise otherwise reads as a texture change
+(night corr 0.977 → 0.996).
+
+The port also found that libobs tracks only 8 texture units per effect (`GS_MAX_TEXTURES`);
+the final effect had grown to 13, which corrupted the GL backend's texture/sampler cache
+(per-frame GL errors and stale masks sampled after a source change). The final effect is now
+held at 8: shared masks are bound once, skin colour and pigment share one skin-weighted OD
+texture, the body height field lives in tone's alpha, and the Filters LUT is its own pass.

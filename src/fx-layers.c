@@ -34,7 +34,7 @@ struct fx_layers {
 	obs_data_t *effect_shape;
 
 	gs_effect_t *post;
-	gs_texrender_t *tr_fx, *tr_post;
+	gs_texrender_t *tr_lut, *tr_fx, *tr_post;
 
 	/* per-tab switches */
 	bool effects_on, atmo_on, filters_on, lights_on;
@@ -65,6 +65,7 @@ struct fx_layers *fx_layers_create(void)
 	struct fx_layers *fx = bzalloc(sizeof(*fx));
 	obs_enter_graphics();
 	fx->post = load_effect_src("effects/post.effect");
+	fx->tr_lut = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	fx->tr_fx = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	fx->tr_post = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	obs_leave_graphics();
@@ -87,6 +88,7 @@ void fx_layers_destroy(struct fx_layers *fx)
 	if (!fx)
 		return;
 	gs_effect_destroy(fx->post);
+	gs_texrender_destroy(fx->tr_lut);
 	gs_texrender_destroy(fx->tr_fx);
 	gs_texrender_destroy(fx->tr_post);
 	gs_texture_destroy(fx->filter_lut);
@@ -192,10 +194,7 @@ void fx_layers_apply_shape(const struct fx_layers *fx, struct beauty_shape *sh)
 void fx_layers_set_final_params(struct fx_layers *fx, gs_effect_t *fe, gs_texture_t *fallback)
 {
 #define P(n) gs_effect_get_param_by_name(fe, n)
-	gs_effect_set_texture(P("filter_lut_tex"), fx->filter_lut ? fx->filter_lut : fallback);
-	gs_effect_set_float(P("filter_lut_size"), (float)FILTER_LUT_N);
-	gs_effect_set_float(P("filter_lut_amt"), fx->filter_lut ? fx->filter_amt : 0.0f);
-
+	(void)fallback;
 	const struct light_params *l = &fx->light;
 	float amt = fx->light_on ? fx->light_amt : 0.0f;
 	struct vec4 v;
@@ -279,6 +278,24 @@ gs_texture_t *fx_layers_render(struct fx_layers *fx, gs_texture_t *in, uint32_t 
 	if (!fx->post)
 		return in;
 	gs_texture_t *cur = in;
+
+	/* Filters tab LUT (its own pass: the final effect is at libobs's 8-texture limit) */
+	if (fx->filter_lut && fx->filter_amt > 0) {
+		gs_effect_t *e = fx->post;
+		gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), cur);
+		gs_effect_set_texture(gs_effect_get_param_by_name(e, "filter_lut_tex"), fx->filter_lut);
+		gs_effect_set_float(gs_effect_get_param_by_name(e, "filter_lut_size"), (float)FILTER_LUT_N);
+		gs_effect_set_float(gs_effect_get_param_by_name(e, "filter_lut_amt"), fx->filter_amt);
+		gs_texrender_reset(fx->tr_lut);
+		if (gs_texrender_begin(fx->tr_lut, w, h)) {
+			gs_ortho(0.0f, (float)w, 0.0f, (float)h, -100.0f, 100.0f);
+			gs_enable_blending(false);
+			while (gs_effect_loop(e, "FilterLut"))
+				gs_draw_sprite(cur, 0, w, h);
+			gs_texrender_end(fx->tr_lut);
+			cur = gs_texrender_get_texture(fx->tr_lut);
+		}
+	}
 
 	/* stickers */
 	if (fx->effects_on && fx->effect.sprite_count > 0 && L->has_face && face_weight > 0.01f) {
