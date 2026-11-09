@@ -1,0 +1,337 @@
+// obs-beauty post pass: Motion (camera-style moves) + Atmosphere (procedural particle
+// ambience), plus small helper techniques for drawing sticker sprites.
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float  opacity;
+
+uniform float2 size;
+uniform float  time;
+uniform int    motion_style;   // 1 shake, 2 pulse, 3 rgb split, 4 drift, 5 glitch, 6 wobble
+uniform float  motion_amt;
+uniform float  motion_speed;
+uniform int    atmo_style;     // see enum atmo_style in presets.h
+uniform float  atmo_amt;
+uniform float4 color_a;
+uniform float4 color_b;
+uniform float4 atmo_params;    // density, speed, size
+
+sampler_state linearClamp {
+	Filter    = Linear;
+	AddressU  = Clamp;
+	AddressV  = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSCopy(VertData v_in) : TARGET
+{
+	return image.Sample(linearClamp, v_in.uv);
+}
+
+float4 PSSprite(VertData v_in) : TARGET
+{
+	float4 c = image.Sample(linearClamp, v_in.uv);
+	return float4(c.rgb, c.a * opacity);
+}
+
+// ------------------------------------------------------------ helpers
+
+float hash21(float2 p)
+{
+	p = frac(p * float2(123.34, 456.21));
+	p += dot(p, p + 45.32);
+	return frac(p.x * p.y);
+}
+
+float2 hash22(float2 p)
+{
+	float n = hash21(p);
+	return float2(n, hash21(p + n + 17.17));
+}
+
+float vnoise(float2 p)
+{
+	float2 i = floor(p);
+	float2 f = frac(p);
+	float2 u = f * f * (3.0 - 2.0 * f);
+	float a = hash21(i);
+	float b = hash21(i + float2(1.0, 0.0));
+	float c = hash21(i + float2(0.0, 1.0));
+	float d = hash21(i + float2(1.0, 1.0));
+	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+float fbm(float2 p)
+{
+	float s = 0.0;
+	float a = 0.5;
+	for (int i = 0; i < 4; i++) {
+		s += vnoise(p) * a;
+		p = p * 2.03 + float2(1.7, 9.2);
+		a *= 0.5;
+	}
+	return s;
+}
+
+float2 rot2(float2 q, float a)
+{
+	float c = cos(a);
+	float s = sin(a);
+	return float2(q.x * c - q.y * s, q.x * s + q.y * c);
+}
+
+// heart SDF (negative inside), q in units of the heart size, y up
+float sd_heart(float2 q)
+{
+	q.x = abs(q.x);
+	if (q.y + q.x > 1.0) {
+		float2 d = q - float2(0.25, 0.75);
+		return sqrt(dot(d, d)) - 0.35355;
+	}
+	float2 d1 = q - float2(0.0, 1.0);
+	float m = 0.5 * max(q.x + q.y, 0.0);
+	float2 d2 = q - float2(m, m);
+	return sqrt(min(dot(d1, d1), dot(d2, d2))) * sign(q.x - q.y);
+}
+
+// ------------------------------------------------------------ particles
+//
+// Each style scatters one particle per grid cell (some cells empty), moving the grid over
+// time; we look at the 3x3 neighbourhood so particles can cross cell borders.
+// Returns premultiplied rgb in .rgb and coverage in .a; `glow` styles add instead of cover.
+
+float4 particle_layer(float2 p, float cell, float2 vel, float seed, float density, float t)
+{
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	float2 moved = p - vel * t;
+	float2 g = floor(moved / cell);
+	for (int oy = -1; oy <= 1; oy++) {
+		for (int ox = -1; ox <= 1; ox++) {
+			float2 id = g + float2(float(ox), float(oy));
+			float2 r = hash22(id + seed);
+			float present = step(hash21(id * 1.31 + seed + 3.7), density);
+			if (present > 0.0) {
+				float2 center = (id + 0.2 + 0.6 * r) * cell;
+				float ph = hash21(id + seed + 9.1) * 6.2831;
+				float sz = cell * (0.18 + 0.22 * hash21(id + seed + 5.3)) * atmo_params.z;
+				float2 q = moved - center;
+				float a = 0.0;
+				float3 col = lerp(color_a.rgb, color_b.rgb, hash21(id + seed + 2.2));
+
+				if (atmo_style == 1 || atmo_style == 9) { // sparkle / glitter: 4-point stars
+					float tw = 0.5 + 0.5 * sin(t * 3.0 * atmo_params.y + ph);
+					tw = tw * tw;
+					float s2 = sz * (atmo_style == 9 ? 0.35 : 0.9);
+					float2 aq = abs(q) / s2;
+					float star = max(0.0, 1.0 - aq.x * 7.0) * max(0.0, 1.0 - aq.y) +
+						     max(0.0, 1.0 - aq.y * 7.0) * max(0.0, 1.0 - aq.x);
+					float core = exp(-dot(q, q) / (s2 * s2 * 0.02));
+					a = saturate((star + core) * tw);
+				} else if (atmo_style == 2) { // bokeh
+					float d = length(q) / (sz * 1.6);
+					a = (smoothstep(1.0, 0.85, d) * 0.35 + smoothstep(1.0, 0.93, d) * smoothstep(0.85, 0.95, d) * 0.3) *
+					    (0.6 + 0.4 * sin(t * 0.8 + ph));
+				} else if (atmo_style == 3) { // hearts
+					float2 hq = rot2(q + float2(sin(t * 1.3 + ph) * cell * 0.15, 0.0), sin(t + ph) * 0.4);
+					float d = sd_heart(float2(hq.x, -hq.y) / sz + float2(0.0, 0.5));
+					a = smoothstep(0.04, -0.04, d);
+					col = col * (0.85 + 0.3 * saturate(-d * 3.0));
+				} else if (atmo_style == 4) { // petals: notched teardrop that tumbles (foreshortened)
+					float2 pq = rot2(q + float2(sin(t * 0.9 + ph) * cell * 0.25, 0.0), t * 1.1 + ph);
+					pq.x /= 0.5 + 0.35 * abs(sin(t * 1.7 + ph * 2.0)); // tumbling
+					float2 u2 = pq / (sz * 0.7);
+					float d = length(u2 * float2(1.0, 0.75 + 0.25 * smoothstep(-1.0, 1.0, u2.y)));
+					float notch = smoothstep(0.18, 0.0, length(u2 - float2(0.0, -0.95)));
+					a = smoothstep(1.0, 0.82, d) * (1.0 - notch) * 0.9;
+					col = lerp(col, float3(1.0, 0.97, 0.98), 0.45 * smoothstep(0.8, 0.0, d));
+				} else if (atmo_style == 5) { // snow
+					float2 sq = q + float2(sin(t * 0.7 + ph) * cell * 0.2, 0.0);
+					float d = length(sq) / (sz * 0.45);
+					a = smoothstep(1.0, 0.3, d) * 0.9;
+				} else if (atmo_style == 6) { // fireflies
+					float2 fq = q + float2(sin(t * 0.6 + ph), cos(t * 0.5 + ph * 1.3)) * cell * 0.25;
+					float d2 = dot(fq, fq) / (sz * sz * 0.08);
+					a = (exp(-d2) * 1.2 + exp(-d2 * 0.15) * 0.25) * (0.5 + 0.5 * sin(t * 2.0 + ph));
+				} else if (atmo_style == 11) { // confetti
+					float2 cq = rot2(q, t * 2.0 * (0.5 + r.x) + ph);
+					cq.y *= 1.0 + 0.6 * sin(t * 4.0 + ph); // flutter
+					float2 aq = abs(cq) / float2(sz * 0.45, sz * 0.22);
+					a = smoothstep(1.0, 0.85, max(aq.x, aq.y));
+					float3 pal = lerp(float3(1.0, 0.85, 0.2), float3(0.3, 0.75, 1.0), step(0.5, r.y));
+					col = lerp(col, pal, step(0.66, hash21(id + 8.8)));
+				} else if (atmo_style == 12) { // bubbles
+					float d = length(q) / (sz * 1.2);
+					float ring = smoothstep(1.0, 0.92, d) * smoothstep(0.75, 0.95, d);
+					float2 hl = q / (sz * 1.2) - float2(-0.35, -0.35);
+					a = ring * 0.8 + smoothstep(0.25, 0.0, length(hl)) * 0.7 + smoothstep(1.0, 0.0, d) * 0.06;
+				}
+				a = saturate(a);
+				acc.rgb = acc.rgb * (1.0 - a) + col * a;
+				acc.a = acc.a + a * (1.0 - acc.a);
+			}
+		}
+	}
+	return acc;
+}
+
+float4 atmosphere(float2 uv, float t, float3 base)
+{
+	float aspect = size.x / size.y;
+	float2 p = float2(uv.x * aspect, uv.y);
+	float dens = saturate(0.45 * atmo_params.x);
+	float sp = atmo_params.y;
+	int s = atmo_style;
+
+	if (s == 7) { // light leaks: warm gradients drifting along the edges
+		float2 c1 = float2(0.1 + 0.15 * sin(t * 0.21 * sp), 0.2 + 0.3 * sin(t * 0.13 * sp + 1.0));
+		float2 c2 = float2(aspect - 0.15 + 0.1 * sin(t * 0.17 * sp + 2.0), 0.8 + 0.2 * sin(t * 0.11 * sp));
+		float g1 = exp(-dot(p - c1, p - c1) * 3.0);
+		float g2 = exp(-dot(p - c2, p - c2) * 2.5);
+		return float4(color_a.rgb * g1 * 0.8 + color_b.rgb * g2 * 0.7, 0.0);
+	}
+	if (s == 8) { // mist: drifting fog hugging the bottom of the frame
+		float n = fbm(float2(p.x * 2.5 + t * 0.12 * sp, p.y * 3.0 - t * 0.05 * sp));
+		float n2 = fbm(float2(p.x * 5.0 - t * 0.2 * sp, p.y * 6.0));
+		float h = smoothstep(0.35, 1.0, uv.y);
+		float a = saturate((n * 0.8 + n2 * 0.4 - 0.25) * 1.6) * h * 0.9;
+		float3 col = lerp(color_a.rgb, color_b.rgb, n2);
+		return float4(col * a, -a); // negative alpha marks "cover" in the caller
+	}
+	if (s == 10) { // dreamy: soft glow from the frame's own highlights + tinted haze + vignette
+		float3 glow = float3(0.0, 0.0, 0.0);
+		float2 px = 1.0 / size;
+		for (int i = 0; i < 12; i++) {
+			float an = float(i) * 0.5236;
+			float2 o = float2(cos(an), sin(an)) * px * (14.0 + 10.0 * float(i % 2));
+			float3 c = image.Sample(linearClamp, uv + o).rgb;
+			glow += max(c - 0.55, 0.0);
+		}
+		glow = glow / 12.0 * 2.2;
+		float vig = smoothstep(0.35, 1.0, length((uv - 0.5) * float2(aspect, 1.0)) / (aspect * 0.6));
+		return float4(glow * color_a.rgb + color_b.rgb * 0.10 + color_b.rgb * vig * 0.25, 0.0);
+	}
+
+	float2 vel = float2(0.0, 0.08) * sp;            // falling
+	if (s == 3 || s == 12 || s == 2) vel = float2(0.0, -0.06) * sp; // rising
+	if (s == 1 || s == 9 || s == 6) vel = float2(0.01, 0.0) * sp;   // drifting in place
+	float cellA = (s == 9) ? 0.05 : (s == 2 ? 0.22 : 0.13);
+	if (s == 4 || s == 3 || s == 11) dens *= 0.45;   // big covering shapes: keep it airy
+	float4 far = particle_layer(p, cellA * 0.7, vel * 0.6, 11.0, dens * 0.8, t);
+	float4 near = particle_layer(p, cellA, vel, 37.0, dens, t);
+	far.rgb *= 0.7;
+	far.a *= 0.7;
+	float4 acc;
+	acc.rgb = far.rgb * (1.0 - near.a) + near.rgb;
+	acc.a = far.a + near.a * (1.0 - far.a);
+	bool glowy = (s == 1 || s == 2 || s == 6 || s == 9 || s == 12);
+	if (glowy)
+		return float4(acc.rgb, 0.0);      // additive light
+	return float4(acc.rgb, -acc.a);       // covering particles
+}
+
+// ------------------------------------------------------------ motion
+
+float2 motion_uv(float2 uv, float t, float amt)
+{
+	float aspect = size.x / size.y;
+	float sp = motion_speed;
+	if (motion_style == 1) { // handheld shake
+		float2 o = float2(sin(t * 13.0 * sp) * 0.6 + sin(t * 7.3 * sp + 1.3), cos(t * 11.0 * sp) * 0.6 + sin(t * 5.1 * sp + 4.0)) * 0.006 * amt;
+		float r = sin(t * 4.7 * sp) * 0.006 * amt;
+		float2 c = (uv - 0.5) * float2(aspect, 1.0);
+		c = rot2(c, r) * (1.0 - 0.025 * amt);
+		return c / float2(aspect, 1.0) + 0.5 + o;
+	}
+	if (motion_style == 2) { // beat pulse
+		float beat = exp(-frac(t * sp * 2.0) * 7.0);
+		return (uv - 0.5) * (1.0 - 0.07 * amt * beat) + 0.5;
+	}
+	if (motion_style == 4) { // slow drift (ken burns)
+		float z = 1.0 - amt * (0.04 + 0.03 * sin(t * 0.25 * sp));
+		float2 pan = float2(sin(t * 0.17 * sp), cos(t * 0.13 * sp)) * 0.015 * amt;
+		return (uv - 0.5) * z + 0.5 + pan;
+	}
+	if (motion_style == 5) { // glitch: horizontal band jumps
+		float slot = floor(t * 10.0 * sp);
+		float on = step(0.72, hash21(float2(slot, 3.0)));
+		float band = floor(uv.y * 18.0);
+		float shift = (hash21(float2(band, slot)) - 0.5) * 0.08 * amt * on * step(0.6, hash21(float2(band, slot + 1.0)));
+		return uv + float2(shift, 0.0);
+	}
+	if (motion_style == 6) { // wobble
+		return uv + float2(sin(uv.y * 10.0 + t * 4.0 * sp), cos(uv.x * 8.0 + t * 3.0 * sp)) * 0.004 * amt;
+	}
+	return uv;
+}
+
+float4 PSPost(VertData v_in) : TARGET
+{
+	float t = time;
+	float2 uv = v_in.uv;
+	float4 col;
+	if (motion_style > 0) {
+		float2 m = motion_uv(uv, t, motion_amt);
+		float split = 0.0;
+		if (motion_style == 3)
+			split = 0.006 * motion_amt * (0.6 + 0.4 * sin(t * 3.0 * motion_speed));
+		if (motion_style == 5)
+			split = 0.01 * motion_amt * step(0.72, hash21(float2(floor(t * 10.0 * motion_speed), 3.0)));
+		if (split > 0.0) {
+			col = image.Sample(linearClamp, m);
+			col.r = image.Sample(linearClamp, m + float2(split, 0.0)).r;
+			col.b = image.Sample(linearClamp, m - float2(split, 0.0)).b;
+		} else {
+			col = image.Sample(linearClamp, m);
+		}
+	} else {
+		col = image.Sample(linearClamp, uv);
+	}
+
+	if (atmo_style > 0 && atmo_amt > 0.0) {
+		float4 a = atmosphere(uv, t, col.rgb);
+		if (a.a < 0.0)
+			col.rgb = col.rgb * (1.0 + a.a * atmo_amt) + a.rgb * atmo_amt;  // cover
+		else
+			col.rgb = col.rgb + a.rgb * atmo_amt;                              // add light
+	}
+	return float4(saturate(col.rgb), col.a);
+}
+
+technique Copy
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSCopy(v_in);
+	}
+}
+
+technique Sprite
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSprite(v_in);
+	}
+}
+
+technique Post
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSPost(v_in);
+	}
+}

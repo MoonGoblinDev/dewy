@@ -1,0 +1,147 @@
+// Helper passes for obs-beauty: downscale, separable bilateral (skin smoothing) and
+// separable gaussian (low-frequency "tone" used by foundation / shadow removal).
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float2 texel;      // 1 / source size
+uniform float2 dir;        // (1,0) horizontal, (0,1) vertical
+uniform float step_px;     // tap spacing in source pixels
+uniform float sigma_r;     // bilateral range sigma (RGB distance)
+uniform texture2d guide;   // Refine: the frame (half res) / SkinPremul: refined mask
+
+sampler_state linearClamp {
+	Filter    = Linear;
+	AddressU  = Clamp;
+	AddressV  = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSCopy(VertData v_in) : TARGET
+{
+	return image.Sample(linearClamp, v_in.uv);
+}
+
+// 17-tap edge-preserving blur along one axis. Neighbours whose colour differs from the
+// centre pixel get little weight, so pores and blemishes blur away but eyes, brows,
+// lips and the face outline stay sharp.
+float4 PSBilateral(VertData v_in) : TARGET
+{
+	float4 c0 = image.Sample(linearClamp, v_in.uv);
+	float3 sum = c0.rgb;
+	float wsum = 1.0;
+	float inv2sr2 = 1.0 / (2.0 * sigma_r * sigma_r);
+	float2 o = dir * texel * step_px;
+
+	for (int i = 1; i <= 8; i++) {
+		float fi = float(i);
+		float ws = exp(-fi * fi / 24.5);   // spatial sigma = 3.5 taps
+		float3 a = image.Sample(linearClamp, v_in.uv + o * fi).rgb;
+		float3 b = image.Sample(linearClamp, v_in.uv - o * fi).rgb;
+		float3 da = a - c0.rgb;
+		float3 db = b - c0.rgb;
+		float wa = ws * exp(-dot(da, da) * inv2sr2);
+		float wb = ws * exp(-dot(db, db) * inv2sr2);
+		sum += a * wa + b * wb;
+		wsum += wa + wb;
+	}
+	return float4(sum / wsum, c0.a);
+}
+
+// 9-tap gaussian along one axis.
+float4 PSGauss(VertData v_in) : TARGET
+{
+	float2 o = dir * texel * step_px;
+	float4 sum = image.Sample(linearClamp, v_in.uv) * 0.2270270;
+	sum += (image.Sample(linearClamp, v_in.uv + o * 1.3846154) +
+		image.Sample(linearClamp, v_in.uv - o * 1.3846154)) * 0.3162162;
+	sum += (image.Sample(linearClamp, v_in.uv + o * 3.2307692) +
+		image.Sample(linearClamp, v_in.uv - o * 3.2307692)) * 0.0702703;
+	return sum;
+}
+
+// Joint-bilateral upsampling of the low-res segmentation (image = mask, guide = frame):
+// mask values are averaged only from neighbours whose image colour matches this pixel, so
+// mask edges snap to the real hairline / glasses / hand edges.
+float4 PSRefine(VertData v_in) : TARGET
+{
+	float3 c = guide.Sample(linearClamp, v_in.uv).rgb;
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+	float wsum = 0.0;
+	for (int j = -2; j <= 2; j++) {
+		for (int i = -2; i <= 2; i++) {
+			float2 k = float2(float(i), float(j));
+			float2 uv = v_in.uv + k * texel;
+			float3 g = guide.Sample(linearClamp, uv).rgb;
+			float3 d = g - c;
+			float w = exp(-dot(k, k) / 4.5) * exp(-dot(d, d) / (2.0 * sigma_r * sigma_r)) + 1e-4;
+			acc += image.Sample(linearClamp, uv) * w;
+			wsum += w;
+		}
+	}
+	return acc / wsum;
+}
+
+// Skin-weighted colour for normalised convolution: rgb * skin, skin.
+float4 PSSkinPremul(VertData v_in) : TARGET
+{
+	float3 c = image.Sample(linearClamp, v_in.uv).rgb;
+	float s = guide.Sample(linearClamp, v_in.uv).r;
+	return float4(c * s, s);
+}
+
+technique Refine
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSRefine(v_in);
+	}
+}
+
+technique SkinPremul
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSSkinPremul(v_in);
+	}
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSCopy(v_in);
+	}
+}
+
+technique Bilateral
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSBilateral(v_in);
+	}
+}
+
+technique Gauss
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSGauss(v_in);
+	}
+}

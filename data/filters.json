@@ -1,0 +1,244 @@
+{
+ "categories": [
+  {
+   "name": "Natural",
+   "filters": [
+    {
+     "name": "Clear",
+     "exposure": 0.04,
+     "contrast": 0.08,
+     "vibrance": 0.15,
+     "rolloff": 0.3
+    },
+    {
+     "name": "Fresh",
+     "exposure": 0.06,
+     "warmth": -0.06,
+     "tint": 0.02,
+     "vibrance": 0.2,
+     "contrast": 0.05
+    },
+    {
+     "name": "Soft",
+     "exposure": 0.05,
+     "contrast": -0.25,
+     "fade": 0.15,
+     "saturation": -0.05,
+     "rolloff": 0.5
+    },
+    {
+     "name": "Bright",
+     "exposure": 0.15,
+     "contrast": -0.05,
+     "vibrance": 0.1,
+     "rolloff": 0.6
+    },
+    {
+     "name": "Honey",
+     "warmth": 0.18,
+     "tint": 0.03,
+     "vibrance": 0.1,
+     "highlights": "#ffd9a0",
+     "highlights_amt": 0.25
+    },
+    {
+     "name": "Milk",
+     "exposure": 0.12,
+     "contrast": -0.15,
+     "saturation": -0.18,
+     "fade": 0.2,
+     "highlights": "#fff2e8",
+     "highlights_amt": 0.3
+    }
+   ]
+  },
+  {
+   "name": "Emotional",
+   "filters": [
+    {
+     "name": "Mood",
+     "contrast": 0.12,
+     "saturation": -0.2,
+     "fade": 0.12,
+     "shadows": "#2a3a55",
+     "shadows_amt": 0.35,
+     "highlights": "#f2d2b0",
+     "highlights_amt": 0.2
+    },
+    {
+     "name": "Blue Hour",
+     "warmth": -0.25,
+     "tint": 0.04,
+     "contrast": 0.05,
+     "shadows": "#1f3a6e",
+     "shadows_amt": 0.4,
+     "saturation": -0.05
+    },
+    {
+     "name": "Dusk",
+     "warmth": 0.12,
+     "tint": 0.12,
+     "contrast": 0.08,
+     "shadows": "#4a2a5a",
+     "shadows_amt": 0.35,
+     "highlights": "#ffb08a",
+     "highlights_amt": 0.3
+    },
+    {
+     "name": "Faded",
+     "contrast": -0.2,
+     "fade": 0.4,
+     "saturation": -0.25,
+     "warmth": 0.04
+    },
+    {
+     "name": "Teal & Orange",
+     "contrast": 0.15,
+     "vibrance": 0.15,
+     "shadows": "#1e6a78",
+     "shadows_amt": 0.45,
+     "highlights": "#ffb070",
+     "highlights_amt": 0.35
+    },
+    {
+     "name": "Rainy",
+     "exposure": -0.05,
+     "warmth": -0.12,
+     "saturation": -0.3,
+     "contrast": 0.05,
+     "fade": 0.1,
+     "shadows": "#2e4650",
+     "shadows_amt": 0.3
+    }
+   ]
+  },
+  {
+   "name": "Vivid",
+   "filters": [
+    {
+     "name": "Pop",
+     "contrast": 0.18,
+     "saturation": 0.25,
+     "vibrance": 0.2
+    },
+    {
+     "name": "Tropical",
+     "warmth": 0.1,
+     "saturation": 0.3,
+     "hue": -6,
+     "contrast": 0.1,
+     "highlights": "#fff0a0",
+     "highlights_amt": 0.2
+    },
+    {
+     "name": "Punch",
+     "contrast": 0.3,
+     "curve": 0.1,
+     "saturation": 0.15,
+     "rolloff": 0.4
+    },
+    {
+     "name": "Candy",
+     "tint": 0.15,
+     "saturation": 0.2,
+     "exposure": 0.08,
+     "highlights": "#ffc6e6",
+     "highlights_amt": 0.3
+    },
+    {
+     "name": "Neon Night",
+     "contrast": 0.2,
+     "saturation": 0.35,
+     "tint": 0.18,
+     "warmth": -0.1,
+     "shadows": "#3a1a6e",
+     "shadows_amt": 0.45
+    }
+   ]
+  },
+  {
+   "name": "Film",
+   "filters": [
+    {
+     "name": "Portra",
+     "warmth": 0.08,
+     "contrast": -0.05,
+     "saturation": -0.08,
+     "fade": 0.08,
+     "gamma_g": 0.03,
+     "highlights": "#ffe2c4",
+     "highlights_amt": 0.2,
+     "rolloff": 0.5
+    },
+    {
+     "name": "Gold 200",
+     "warmth": 0.2,
+     "tint": -0.02,
+     "contrast": 0.08,
+     "saturation": 0.05,
+     "fade": 0.1,
+     "highlights": "#ffd480",
+     "highlights_amt": 0.3
+    },
+    {
+     "name": "Fuji Green",
+     "warmth": -0.05,
+     "tint": -0.12,
+     "contrast": 0.1,
+     "shadows": "#2a5a4a",
+     "shadows_amt": 0.3,
+     "saturation": -0.05
+    },
+    {
+     "name": "Cinema",
+     "contrast": 0.2,
+     "saturation": -0.15,
+     "shadows": "#173a48",
+     "shadows_amt": 0.35,
+     "highlights": "#f5c89a",
+     "highlights_amt": 0.25,
+     "fade": 0.05
+    },
+    {
+     "name": "Vintage",
+     "warmth": 0.15,
+     "saturation": -0.3,
+     "fade": 0.35,
+     "contrast": -0.1,
+     "shadows": "#5a3a2a",
+     "shadows_amt": 0.2
+    }
+   ]
+  },
+  {
+   "name": "B&W",
+   "filters": [
+    {
+     "name": "Mono",
+     "mono": true,
+     "contrast": 0.1
+    },
+    {
+     "name": "Noir",
+     "mono": true,
+     "contrast": 0.45,
+     "curve": 0.15,
+     "exposure": -0.05
+    },
+    {
+     "name": "Silver",
+     "mono": true,
+     "contrast": -0.05,
+     "fade": 0.15,
+     "mono_tint": "#e8eef5"
+    },
+    {
+     "name": "Sepia",
+     "mono": true,
+     "mono_tint": "#e8c9a0",
+     "fade": 0.1
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,94 @@
+{
+ "lights": [
+  {
+   "name": "Soft Box",
+   "az": -20,
+   "el": 25,
+   "key": "#fff4e8",
+   "key_amt": 0.45,
+   "fill": 0.15,
+   "exposure": 0.05
+  },
+  {
+   "name": "Butterfly",
+   "az": 0,
+   "el": 45,
+   "key": "#ffffff",
+   "key_amt": 0.5,
+   "fill": 0.3,
+   "exposure": 0.02
+  },
+  {
+   "name": "Rembrandt",
+   "az": -50,
+   "el": 30,
+   "key": "#fff1e0",
+   "key_amt": 0.6,
+   "fill": 0.6,
+   "bg_dim": 0.15
+  },
+  {
+   "name": "Split",
+   "az": -85,
+   "el": 5,
+   "key": "#ffffff",
+   "key_amt": 0.7,
+   "fill": 0.85,
+   "bg_dim": 0.25
+  },
+  {
+   "name": "Golden Hour",
+   "az": 55,
+   "el": 10,
+   "key": "#ffb469",
+   "key_amt": 0.8,
+   "fill": 0.35,
+   "rim": "#ffd29a",
+   "rim_amt": 0.4,
+   "warmth": 0.3
+  },
+  {
+   "name": "Moonlight",
+   "az": -40,
+   "el": 50,
+   "key": "#a9c6ff",
+   "key_amt": 0.55,
+   "fill": 0.55,
+   "bg_dim": 0.35,
+   "warmth": -0.35,
+   "exposure": -0.1
+  },
+  {
+   "name": "Spotlight",
+   "az": 0,
+   "el": 20,
+   "key": "#ffffff",
+   "key_amt": 0.5,
+   "fill": 0.2,
+   "bg_dim": 0.6,
+   "exposure": 0.05
+  },
+  {
+   "name": "Neon",
+   "az": -70,
+   "el": 10,
+   "key": "#ff4fa8",
+   "key_amt": 0.9,
+   "fill": 0.5,
+   "rim": "#38d6ff",
+   "rim_amt": 0.9,
+   "bg_dim": 0.3
+  },
+  {
+   "name": "Rim Glow",
+   "az": 0,
+   "el": 10,
+   "key": "#ffffff",
+   "key_amt": 0.15,
+   "fill": 0.2,
+   "rim": "#ffffff",
+   "rim_amt": 1.0,
+   "bg_dim": 0.35
+  }
+ ]
+}

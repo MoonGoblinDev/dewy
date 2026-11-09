@@ -1,0 +1,126 @@
+{
+ "ambience": [
+  {
+   "name": "Sparkles",
+   "style": "sparkle",
+   "a": "#ffffff",
+   "b": "#ffe2a8",
+   "density": 1.0
+  },
+  {
+   "name": "Golden Dust",
+   "style": "glitter",
+   "a": "#ffd27a",
+   "b": "#fff3c4",
+   "density": 1.6
+  },
+  {
+   "name": "Bokeh",
+   "style": "bokeh",
+   "a": "#ffb3d1",
+   "b": "#9fd2ff",
+   "density": 1.0
+  },
+  {
+   "name": "Hearts",
+   "style": "hearts",
+   "a": "#ff5c93",
+   "b": "#ff9cc2",
+   "density": 0.8
+  },
+  {
+   "name": "Sakura",
+   "style": "petals",
+   "a": "#ffc4d8",
+   "b": "#ff9fbf",
+   "density": 1.0
+  },
+  {
+   "name": "Snow",
+   "style": "snow",
+   "a": "#ffffff",
+   "b": "#dfefff",
+   "density": 1.4
+  },
+  {
+   "name": "Fireflies",
+   "style": "fireflies",
+   "a": "#ffe27a",
+   "b": "#c8ff8a",
+   "density": 0.9
+  },
+  {
+   "name": "Light Leak",
+   "style": "leak",
+   "a": "#ff8a3d",
+   "b": "#ff4f7a",
+   "speed": 1.0
+  },
+  {
+   "name": "Purple Mist",
+   "style": "mist",
+   "a": "#8f6bff",
+   "b": "#cdb8ff",
+   "speed": 1.0
+  },
+  {
+   "name": "Night Fog",
+   "style": "mist",
+   "a": "#9fb4c8",
+   "b": "#e6eef5",
+   "speed": 0.6
+  },
+  {
+   "name": "Dreamy",
+   "style": "dreamy",
+   "a": "#ffd6ea",
+   "b": "#ffb3d6"
+  },
+  {
+   "name": "Confetti",
+   "style": "confetti",
+   "a": "#ff4f7a",
+   "b": "#7a5cff",
+   "density": 1.0
+  },
+  {
+   "name": "Bubbles",
+   "style": "bubbles",
+   "a": "#cfe9ff",
+   "b": "#ffffff",
+   "density": 0.7
+  }
+ ],
+ "motion": [
+  {
+   "name": "Handheld",
+   "style": "shake",
+   "speed": 1.0
+  },
+  {
+   "name": "Beat Pulse",
+   "style": "pulse",
+   "speed": 1.0
+  },
+  {
+   "name": "RGB Split",
+   "style": "rgb",
+   "speed": 1.0
+  },
+  {
+   "name": "Slow Drift",
+   "style": "drift",
+   "speed": 1.0
+  },
+  {
+   "name": "Glitch",
+   "style": "glitch",
+   "speed": 1.0
+  },
+  {
+   "name": "Wobble",
+   "style": "wobble",
+   "speed": 1.0
+  }
+ ]
+}

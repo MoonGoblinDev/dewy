@@ -1,0 +1,297 @@
+{
+  "presets": [
+    {
+      "name": "Natural",
+      "filter": {
+        "exposure": 0.05,
+        "warmth": 0.05,
+        "saturation": 0.05
+      },
+      "makeup": {
+        "lip_color": "#C9707A",
+        "lip_opacity": 0.25,
+        "lip_gloss": 0.3,
+        "blush_color": "#F2A0A0",
+        "blush_opacity": 0.18,
+        "blush_style": 0,
+        "shadow_color": "#A07060",
+        "shadow_opacity": 0.1,
+        "contour": 0.1,
+        "highlight": 0.15,
+        "brow": 0.1
+      }
+    },
+    {
+      "name": "Soft Glow",
+      "filter": {
+        "exposure": 0.1,
+        "contrast": -0.1,
+        "fade": 0.1,
+        "warmth": 0.05
+      },
+      "makeup": {
+        "lip_color": "#D98080",
+        "lip_opacity": 0.3,
+        "lip_gloss": 0.5,
+        "blush_color": "#F5A5A5",
+        "blush_opacity": 0.25,
+        "blush_style": 0,
+        "shadow_color": "#C89080",
+        "shadow_opacity": 0.15,
+        "contour": 0.05,
+        "highlight": 0.3,
+        "brow": 0.05
+      }
+    },
+    {
+      "name": "Peach",
+      "filter": {
+        "exposure": 0.06,
+        "warmth": 0.15,
+        "tint": 0.05,
+        "saturation": 0.05
+      },
+      "makeup": {
+        "lip_color": "#E8806A",
+        "lip_opacity": 0.4,
+        "lip_gloss": 0.4,
+        "blush_color": "#F7A07A",
+        "blush_opacity": 0.3,
+        "blush_style": 2,
+        "shadow_color": "#D49070",
+        "shadow_opacity": 0.25,
+        "liner": 0.1,
+        "highlight": 0.2
+      }
+    },
+    {
+      "name": "Rose",
+      "filter": {
+        "exposure": 0.08,
+        "warmth": -0.02,
+        "tint": 0.08
+      },
+      "makeup": {
+        "lip_color": "#D0506A",
+        "lip_opacity": 0.45,
+        "lip_gloss": 0.4,
+        "blush_color": "#F08CA0",
+        "blush_opacity": 0.3,
+        "blush_style": 0,
+        "shadow_color": "#C07A8A",
+        "shadow_opacity": 0.25,
+        "liner": 0.15,
+        "highlight": 0.2
+      }
+    },
+    {
+      "name": "K-Beauty",
+      "filter": {
+        "exposure": 0.12,
+        "contrast": -0.08,
+        "saturation": -0.05,
+        "warmth": -0.05,
+        "fade": 0.05
+      },
+      "makeup": {
+        "lip_color": "#E0566E",
+        "lip_opacity": 0.5,
+        "lip_gloss": 0.7,
+        "blush_color": "#F7A8B0",
+        "blush_opacity": 0.28,
+        "blush_style": 0,
+        "shadow_color": "#D9A090",
+        "shadow_opacity": 0.15,
+        "liner": 0.1,
+        "contour": 0.05,
+        "highlight": 0.35,
+        "brow": 0.1
+      }
+    },
+    {
+      "name": "Doll",
+      "filter": {
+        "exposure": 0.12,
+        "saturation": 0.1,
+        "tint": 0.06
+      },
+      "makeup": {
+        "lip_color": "#F05A78",
+        "lip_opacity": 0.5,
+        "lip_gloss": 0.6,
+        "blush_color": "#FF9AB0",
+        "blush_opacity": 0.4,
+        "blush_style": 2,
+        "shadow_color": "#E28AA0",
+        "shadow_opacity": 0.3,
+        "liner": 0.35,
+        "highlight": 0.3
+      }
+    },
+    {
+      "name": "Coral",
+      "filter": {
+        "warmth": 0.1,
+        "saturation": 0.1
+      },
+      "makeup": {
+        "lip_color": "#F0605A",
+        "lip_opacity": 0.5,
+        "lip_gloss": 0.3,
+        "blush_color": "#FF8F70",
+        "blush_opacity": 0.3,
+        "blush_style": 1,
+        "shadow_color": "#E09060",
+        "shadow_opacity": 0.25,
+        "liner": 0.2,
+        "contour": 0.15,
+        "highlight": 0.2
+      }
+    },
+    {
+      "name": "Berry",
+      "filter": {
+        "contrast": 0.08,
+        "saturation": 0.05,
+        "warmth": -0.03
+      },
+      "makeup": {
+        "lip_color": "#8E2443",
+        "lip_opacity": 0.6,
+        "lip_gloss": 0.2,
+        "blush_color": "#C86080",
+        "blush_opacity": 0.25,
+        "blush_style": 1,
+        "shadow_color": "#7A4A60",
+        "shadow_opacity": 0.35,
+        "liner": 0.4,
+        "contour": 0.2,
+        "highlight": 0.15,
+        "brow": 0.2
+      }
+    },
+    {
+      "name": "Smoky",
+      "filter": {
+        "contrast": 0.15,
+        "saturation": -0.1,
+        "fade": 0.05
+      },
+      "makeup": {
+        "lip_color": "#A0605E",
+        "lip_opacity": 0.35,
+        "blush_color": "#B07070",
+        "blush_opacity": 0.15,
+        "blush_style": 1,
+        "shadow_color": "#3A3030",
+        "shadow_opacity": 0.55,
+        "liner": 0.6,
+        "contour": 0.3,
+        "highlight": 0.2,
+        "brow": 0.3
+      }
+    },
+    {
+      "name": "Bronze Glam",
+      "filter": {
+        "warmth": 0.2,
+        "contrast": 0.1,
+        "saturation": 0.08
+      },
+      "makeup": {
+        "lip_color": "#A85A48",
+        "lip_opacity": 0.45,
+        "lip_gloss": 0.5,
+        "blush_color": "#D08060",
+        "blush_opacity": 0.25,
+        "blush_style": 1,
+        "shadow_color": "#9A6A40",
+        "shadow_opacity": 0.45,
+        "liner": 0.5,
+        "contour": 0.4,
+        "highlight": 0.4,
+        "brow": 0.3
+      }
+    },
+    {
+      "name": "Cool Porcelain",
+      "filter": {
+        "exposure": 0.1,
+        "warmth": -0.15,
+        "saturation": -0.08,
+        "tint": 0.03
+      },
+      "makeup": {
+        "lip_color": "#D8607A",
+        "lip_opacity": 0.35,
+        "lip_gloss": 0.4,
+        "blush_color": "#F0A0B8",
+        "blush_opacity": 0.2,
+        "blush_style": 0,
+        "highlight": 0.3
+      }
+    },
+    {
+      "name": "Vintage Film",
+      "filter": {
+        "warmth": 0.15,
+        "contrast": -0.05,
+        "saturation": -0.15,
+        "fade": 0.25,
+        "tint": -0.03
+      },
+      "makeup": {
+        "lip_color": "#B0504A",
+        "lip_opacity": 0.3,
+        "blush_color": "#D88070",
+        "blush_opacity": 0.15,
+        "blush_style": 0
+      }
+    },
+    {
+      "name": "Clean (men)",
+      "filter": {
+        "exposure": 0.05,
+        "contrast": 0.05,
+        "saturation": -0.05
+      },
+      "makeup": {
+        "lip_color": "#B07070",
+        "lip_opacity": 0.08,
+        "contour": 0.2,
+        "highlight": 0.1,
+        "brow": 0.25
+      }
+    },
+    {
+      "name": "Sharp (men)",
+      "filter": {
+        "contrast": 0.12,
+        "saturation": -0.08,
+        "warmth": -0.05
+      },
+      "makeup": {
+        "lip_color": "#A07070",
+        "lip_opacity": 0.05,
+        "contour": 0.35,
+        "highlight": 0.15,
+        "brow": 0.35
+      }
+    },
+    {
+      "name": "Warm Tan (men)",
+      "filter": {
+        "warmth": 0.15,
+        "contrast": 0.08,
+        "saturation": 0.05
+      },
+      "makeup": {
+        "lip_color": "#A06A60",
+        "lip_opacity": 0.06,
+        "contour": 0.3,
+        "highlight": 0.2,
+        "brow": 0.25
+      }
+    }
+  ]
+}

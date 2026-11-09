@@ -1,0 +1,513 @@
+{
+ "categories": [
+  {
+   "name": "Cute",
+   "effects": [
+    {
+     "name": "Heart Eyes",
+     "sprites": [
+      {
+       "image": "heart_glasses.png",
+       "anchor": "eyes",
+       "width": 2.55,
+       "x": 0,
+       "y": 0.02
+      },
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": -1.25,
+       "y": 0.55,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0,
+       "rotation": -20
+      },
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": 1.3,
+       "y": 0.4,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0.3,
+       "rotation": 18
+      },
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": -0.85,
+       "y": -0.05,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0.6,
+       "rotation": -10
+      }
+     ]
+    },
+    {
+     "name": "Puppy",
+     "sprites": [
+      {
+       "image": "puppy_ears.png",
+       "anchor": "head_top",
+       "width": 3.2,
+       "x": 0,
+       "y": -0.35,
+       "anim": "sway",
+       "anim_amt": 0.12,
+       "anim_speed": 0.5
+      },
+      {
+       "image": "puppy_nose.png",
+       "anchor": "nose",
+       "width": 0.75,
+       "x": 0,
+       "y": -0.08
+      },
+      {
+       "image": "puppy_tongue.png",
+       "anchor": "mouth",
+       "width": 0.32,
+       "x": 0,
+       "y": 0.22,
+       "anim": "bob",
+       "anim_amt": 0.02,
+       "anim_speed": 1.2
+      }
+     ]
+    },
+    {
+     "name": "Kitty",
+     "sprites": [
+      {
+       "image": "cat_ears.png",
+       "anchor": "head_top",
+       "width": 2.7,
+       "x": 0,
+       "y": 0.1
+      },
+      {
+       "image": "whiskers.png",
+       "anchor": "nose",
+       "width": 2.7,
+       "x": 0,
+       "y": 0.05
+      }
+     ]
+    },
+    {
+     "name": "Bunny",
+     "sprites": [
+      {
+       "image": "bunny_ears.png",
+       "anchor": "head_top",
+       "width": 1.9,
+       "x": 0,
+       "y": -0.75,
+       "anim": "sway",
+       "anim_amt": 0.08,
+       "anim_speed": 0.4
+      },
+      {
+       "image": "heart.png",
+       "anchor": "cheek_l",
+       "width": 0.32,
+       "x": 0,
+       "y": 0,
+       "anim": "pulse",
+       "anim_amt": 0.12,
+       "anim_speed": 1
+      },
+      {
+       "image": "heart.png",
+       "anchor": "cheek_r",
+       "width": 0.32,
+       "x": 0,
+       "y": 0,
+       "anim": "pulse",
+       "anim_amt": 0.12,
+       "anim_speed": 1,
+       "phase": 0.5
+      }
+     ]
+    },
+    {
+     "name": "Flower Crown",
+     "sprites": [
+      {
+       "image": "flower_crown.png",
+       "anchor": "head_top",
+       "width": 3.0,
+       "x": 0,
+       "y": 0.25
+      }
+     ]
+    },
+    {
+     "name": "Angel",
+     "sprites": [
+      {
+       "image": "halo.png",
+       "anchor": "head_top",
+       "width": 1.9,
+       "x": 0,
+       "y": -0.55,
+       "anim": "bob",
+       "anim_amt": 0.06,
+       "anim_speed": 0.5
+      },
+      {
+       "image": "sparkle.png",
+       "anchor": "head_top",
+       "width": 0.35,
+       "x": -1.1,
+       "y": 0.2,
+       "anim": "twinkle",
+       "anim_speed": 0.8
+      },
+      {
+       "image": "sparkle.png",
+       "anchor": "head_top",
+       "width": 0.28,
+       "x": 1.15,
+       "y": 0.0,
+       "anim": "twinkle",
+       "anim_speed": 0.7,
+       "phase": 0.4
+      }
+     ]
+    },
+    {
+     "name": "Love Struck",
+     "sprites": [
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": -1.25,
+       "y": 0.55,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0,
+       "rotation": -20
+      },
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": 1.3,
+       "y": 0.4,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0.3,
+       "rotation": 18
+      },
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": -0.85,
+       "y": -0.05,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0.6,
+       "rotation": -10
+      },
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": 0.95,
+       "y": -0.15,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0.15,
+       "rotation": 12
+      },
+      {
+       "image": "heart.png",
+       "anchor": "head_top",
+       "width": 0.42,
+       "x": 0,
+       "y": -0.35,
+       "anim": "bob",
+       "anim_amt": 0.08,
+       "anim_speed": 0.6,
+       "phase": 0.45,
+       "rotation": 0
+      }
+     ]
+    },
+    {
+     "name": "Blush Hearts",
+     "sprites": [
+      {
+       "image": "heart.png",
+       "anchor": "cheek_l",
+       "width": 0.42,
+       "x": 0,
+       "y": 0,
+       "anim": "pulse",
+       "anim_amt": 0.15,
+       "anim_speed": 0.9,
+       "rotation": -15
+      },
+      {
+       "image": "heart.png",
+       "anchor": "cheek_r",
+       "width": 0.42,
+       "x": 0,
+       "y": 0,
+       "anim": "pulse",
+       "anim_amt": 0.15,
+       "anim_speed": 0.9,
+       "phase": 0.5,
+       "rotation": 15
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Cool",
+   "effects": [
+    {
+     "name": "Shades",
+     "sprites": [
+      {
+       "image": "sunglasses.png",
+       "anchor": "eyes",
+       "width": 2.5,
+       "x": 0,
+       "y": 0.05
+      }
+     ]
+    },
+    {
+     "name": "Deal With It",
+     "sprites": [
+      {
+       "image": "pixel_shades.png",
+       "anchor": "eyes",
+       "width": 2.7,
+       "x": 0,
+       "y": 0.06
+      }
+     ]
+    },
+    {
+     "name": "Royal",
+     "sprites": [
+      {
+       "image": "crown.png",
+       "anchor": "head_top",
+       "width": 1.7,
+       "x": 0,
+       "y": -0.2
+      },
+      {
+       "image": "sparkle.png",
+       "anchor": "head_top",
+       "width": 0.3,
+       "x": -0.95,
+       "y": -0.35,
+       "anim": "twinkle",
+       "anim_speed": 0.9
+      },
+      {
+       "image": "sparkle.png",
+       "anchor": "head_top",
+       "width": 0.25,
+       "x": 0.9,
+       "y": -0.5,
+       "anim": "twinkle",
+       "anim_speed": 0.7,
+       "phase": 0.5
+      }
+     ]
+    },
+    {
+     "name": "Devil",
+     "sprites": [
+      {
+       "image": "devil_horns.png",
+       "anchor": "head_top",
+       "width": 2.4,
+       "x": 0,
+       "y": -0.1
+      }
+     ]
+    },
+    {
+     "name": "Gentleman",
+     "sprites": [
+      {
+       "image": "mustache.png",
+       "anchor": "mouth",
+       "width": 1.35,
+       "x": 0,
+       "y": -0.3
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Glam",
+   "effects": [
+    {
+     "name": "Freckles",
+     "sprites": [
+      {
+       "image": "freckles.png",
+       "anchor": "nose",
+       "width": 2.0,
+       "x": 0,
+       "y": -0.28,
+       "blend": "multiply"
+      }
+     ]
+    },
+    {
+     "name": "Face Gems",
+     "sprites": [
+      {
+       "image": "face_gems.png",
+       "anchor": "eyes",
+       "width": 2.1,
+       "x": 0,
+       "y": 0.42
+      }
+     ]
+    },
+    {
+     "name": "Starry Eyes",
+     "sprites": [
+      {
+       "image": "sparkle.png",
+       "anchor": "eye_l",
+       "width": 0.28,
+       "x": -0.32,
+       "y": -0.18,
+       "anim": "twinkle",
+       "anim_speed": 0.9
+      },
+      {
+       "image": "sparkle.png",
+       "anchor": "eye_r",
+       "width": 0.28,
+       "x": 0.32,
+       "y": -0.18,
+       "anim": "twinkle",
+       "anim_speed": 0.9,
+       "phase": 0.5
+      },
+      {
+       "image": "sparkle.png",
+       "anchor": "cheek_l",
+       "width": 0.18,
+       "x": 0,
+       "y": -0.15,
+       "anim": "twinkle",
+       "anim_speed": 1.1,
+       "phase": 0.2
+      },
+      {
+       "image": "sparkle.png",
+       "anchor": "cheek_r",
+       "width": 0.18,
+       "x": 0,
+       "y": -0.15,
+       "anim": "twinkle",
+       "anim_speed": 1.1,
+       "phase": 0.7
+      },
+      {
+       "image": "face_gems.png",
+       "anchor": "eyes",
+       "width": 2.0,
+       "x": 0,
+       "y": 0.42
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Funny",
+   "effects": [
+    {
+     "name": "Big Eyes",
+     "sprites": [],
+     "shape": {
+      "eye_size": 3.4,
+      "eye_pupil": 1.5
+     }
+    },
+    {
+     "name": "Tiny Face",
+     "sprites": [],
+     "shape": {
+      "face_small": 2.5,
+      "head": 2.0,
+      "eye_size": 0.8
+     }
+    },
+    {
+     "name": "Big Mouth",
+     "sprites": [],
+     "shape": {
+      "mouth_size": 2.6
+     }
+    },
+    {
+     "name": "Alien",
+     "sprites": [],
+     "shape": {
+      "eye_size": 2.8,
+      "face_v": 2.5,
+      "mouth_size": -0.8,
+      "chin": 1.2,
+      "nose_narrow": 1.0
+     }
+    },
+    {
+     "name": "Long Face",
+     "sprites": [],
+     "shape": {
+      "chin": 3.0,
+      "forehead": 2.2,
+      "face_narrow": 1.5
+     }
+    },
+    {
+     "name": "Wide Face",
+     "sprites": [],
+     "shape": {
+      "face_narrow": -3.0,
+      "cheekbone": -1.5
+     }
+    },
+    {
+     "name": "Big Nose",
+     "sprites": [],
+     "shape": {
+      "nose_tip": -3.0,
+      "nose_narrow": -2.0
+     }
+    }
+   ]
+  }
+ ]
+}

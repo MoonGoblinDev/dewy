@@ -1,0 +1,500 @@
+// obs-beauty final composite: face warp -> skin mask -> smoothing / foundation /
+// shadow & fold removal / teeth / bright eyes / clarity.
+
+uniform float4x4 ViewProj;
+uniform texture2d image;       // original frame
+uniform texture2d smooth_tex;  // half-res bilateral
+uniform texture2d tone_tex;    // 1/8-res gaussian (low-frequency skin tone)
+uniform texture2d data_tex;    // warp primitives (texels 0..127) + region ellipses (128..159)
+
+uniform float2 size;           // output size in pixels
+uniform int    warp_count;
+uniform float4 warp_bounds;    // x0, y0, x1, y1 (pixels)
+uniform float  face_weight;    // 0..1 fade when the face appears / disappears
+uniform float2 skin_cbcr;      // reference skin chroma
+uniform float  skin_tol;       // chroma tolerance
+uniform float  all_skin;       // 1 = smooth all skin-coloured pixels, 0 = face only
+
+uniform float smooth_amt;
+uniform float foundation_amt;
+uniform float skin_tone_amt;   // -1 deeper / tanned .. +1 lighter
+uniform float pouch_amt;
+uniform float fold_amt;
+uniform float teeth_amt;
+uniform float eyelight_amt;
+uniform float clarity_amt;
+uniform int   debug_view;      // 0 off, 1 skin mask, 2 regions
+
+// ---- makeup tab ----
+uniform texture2d mask_tex;    // half-res: R lips, G eyeliner, B eye interior
+uniform texture2d lut_tex;     // (N*N) x N 3D LUT strip
+uniform float  lut_size;
+uniform float  lut_amt;
+uniform float  filter_amt;
+uniform float4 grade0;         // exposure, contrast, saturation, warmth (-1..1)
+uniform float4 grade1;         // tint, fade
+uniform float  makeup_amt;
+uniform float4 lip_color;      // rgb + opacity
+uniform float  lip_gloss;
+uniform float4 blush_color;
+uniform float4 shadow_color;
+uniform float4 makeup_extra;   // liner, contour, highlight, brow
+
+// ---- filters tab (LUT) ----
+uniform texture2d filter_lut_tex;
+uniform float  filter_lut_size;
+uniform float  filter_lut_amt;
+
+// ---- light tab ----
+uniform float  light_amt;
+uniform float4 light_dir;      // xyz towards the light (face frame: x right, y down, z camera)
+uniform float4 light_key;      // rgb + strength
+uniform float4 light_rim;      // rgb + strength
+uniform float4 light_misc;     // fill, bg_dim, exposure, warmth
+uniform texture2d person_tex;  // person segmentation mask (R)
+uniform texture2d person_blur; // heavily blurred mask = soft body height field
+uniform float2 person_texel;
+uniform float  has_person;
+uniform texture2d seg_tex;       // refined segmentation: R skin, G face skin, B hair, A person
+uniform texture2d skin_tone_tex; // skin-weighted average colour (premultiplied)
+uniform float  has_seg;
+uniform texture2d prot_tex;      // landmark outlines: R lips, G liner, B eyes + mouth, A brows
+uniform float  has_prot;
+
+sampler_state linearClamp {
+	Filter    = Linear;
+	AddressU  = Clamp;
+	AddressV  = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float3 to_ycc(float3 c)
+{
+	return float3(dot(c, float3(0.299, 0.587, 0.114)),
+		      0.5 + dot(c, float3(-0.168736, -0.331264, 0.5)),
+		      0.5 + dot(c, float3(0.5, -0.418688, -0.081312)));
+}
+
+float3 to_rgb(float3 y)
+{
+	float cb = y.y - 0.5;
+	float cr = y.z - 0.5;
+	return float3(y.x + 1.402 * cr, y.x - 0.344136 * cb - 0.714136 * cr, y.x + 1.772 * cb);
+}
+
+// Soft ellipse mask for region `idx`; 0 when the region is unused.
+float region(float2 p, int idx, float feather)
+{
+	float4 a = data_tex.Load(int3(128 + idx * 2, 0, 0));
+	float4 b = data_tex.Load(int3(129 + idx * 2, 0, 0));
+	if (a.z <= 0.0)
+		return 0.0;
+	float2 q = p - a.xy;
+	float2 l = float2(q.x * b.x + q.y * b.y, -q.x * b.y + q.y * b.x);
+	float t = length(l / a.zw);
+	return 1.0 - smoothstep(1.0 - feather, 1.0, t);
+}
+
+float3 soft_light(float3 a, float3 b)
+{
+	return (1.0 - 2.0 * b) * a * a + 2.0 * b * a;   // pegtop soft light
+}
+
+float luma(float3 c)
+{
+	return dot(c, float3(0.299, 0.587, 0.114));
+}
+
+float3 apply_filter_lut(float3 c)
+{
+	float n = filter_lut_size;
+	float b = saturate(c.b) * (n - 1.0);
+	float b0 = floor(b);
+	float b1 = min(b0 + 1.0, n - 1.0);
+	float2 rg = (saturate(c.rg) * (n - 1.0) + 0.5) / float2(n * n, n);
+	float3 c0 = filter_lut_tex.Sample(linearClamp, rg + float2(b0 / n, 0.0)).rgb;
+	float3 c1 = filter_lut_tex.Sample(linearClamp, rg + float2(b1 / n, 0.0)).rgb;
+	return lerp(c0, c1, b - b0);
+}
+
+float3 apply_lut(float3 c)
+{
+	float n = lut_size;
+	float b = saturate(c.b) * (n - 1.0);
+	float b0 = floor(b);
+	float b1 = min(b0 + 1.0, n - 1.0);
+	float2 rg = (saturate(c.rg) * (n - 1.0) + 0.5) / float2(n * n, n);
+	float3 c0 = lut_tex.Sample(linearClamp, rg + float2(b0 / n, 0.0)).rgb;
+	float3 c1 = lut_tex.Sample(linearClamp, rg + float2(b1 / n, 0.0)).rgb;
+	return lerp(c0, c1, b - b0);
+}
+
+float3 grade(float3 c)
+{
+	float3 g = c * exp2(grade0.x * 0.8);                                 // brightness
+	g *= float3(1.0 + grade0.w * 0.10, 1.0 - grade1.x * 0.07, 1.0 - grade0.w * 0.10);   // warmth / tint
+	g.r *= 1.0 + grade1.x * 0.03;
+	g.b *= 1.0 + grade1.x * 0.03;
+	g = saturate(g);
+	float3 s = g * g * (3.0 - 2.0 * g);                                  // S-curve
+	g = grade0.y >= 0.0 ? lerp(g, s, grade0.y) : lerp(g, float3(0.5, 0.5, 0.5), -grade0.y * 0.35);
+	float y = luma(g);
+	g = lerp(float3(y, y, y), g, 1.0 + grade0.z);                        // saturation
+	g = g * (1.0 - grade1.y * 0.18) + grade1.y * 0.10;                   // fade (lifted blacks)
+	g = saturate(g);
+	if (lut_amt > 0.0)
+		g = lerp(g, apply_lut(g), lut_amt);
+	return g;
+}
+
+// Region with its radii scaled (tight versions of the protection zones).
+float region_scaled(float2 p, int idx, float feather, float scale)
+{
+	float4 a = data_tex.Load(int3(128 + idx * 2, 0, 0));
+	float4 b = data_tex.Load(int3(129 + idx * 2, 0, 0));
+	if (a.z <= 0.0)
+		return 0.0;
+	float2 q = p - a.xy;
+	float2 l = float2(q.x * b.x + q.y * b.y, -q.x * b.y + q.y * b.x);
+	float t = length(l / (a.zw * scale));
+	return 1.0 - smoothstep(1.0 - feather, 1.0, t);
+}
+
+// Inverse-mapped liquify: for each output pixel find where to sample the source.
+float2 warp(float2 p)
+{
+	float2 src = p;
+	if (warp_count <= 0 || p.x < warp_bounds.x || p.y < warp_bounds.y ||
+	    p.x > warp_bounds.z || p.y > warp_bounds.w)
+		return src;
+
+	for (int i = 0; i < 64; i++) {
+		if (i < warp_count) {
+			float4 a = data_tex.Load(int3(i * 2, 0, 0));      // cx, cy, r, type
+			float4 b = data_tex.Load(int3(i * 2 + 1, 0, 0));  // vx, vy, s, -
+			float2 q = p - a.xy;
+			float t2 = dot(q, q) / (a.z * a.z);
+			if (t2 < 1.0) {
+				float f = (1.0 - t2) * (1.0 - t2);
+				if (a.w < 0.5)
+					src -= b.xy * f;                          // translate
+				else if (a.w < 1.5)
+					src -= q * (b.z * f);                     // scale
+				else
+					src -= b.xy * (dot(q, b.xy) * b.z * f);   // directional scale
+			}
+		}
+	}
+	return src;
+}
+
+float4 PSMain(VertData v_in) : TARGET
+{
+	float2 p = v_in.uv * size;
+	float2 sp = warp(p);
+	float2 uv = sp / size;
+
+	float4 orig = image.Sample(linearClamp, uv);
+	float3 col = orig.rgb;
+	float3 sm = smooth_tex.Sample(linearClamp, uv).rgb;
+	float3 tone = tone_tex.Sample(linearClamp, uv).rgb;
+
+	float3 ycc = to_ycc(col);
+	float3 ycc_orig = ycc;
+	float3 tone_ycc = to_ycc(tone);
+
+	// ---------- masks (evaluated in source space so they follow the warp) ----------
+	float fw = face_weight;
+	float face = region(sp, 0, 0.35) * fw;
+	float eyes = max(region(sp, 1, 0.5), region(sp, 2, 0.5)) * fw;
+	float brows = max(region(sp, 3, 0.5), region(sp, 4, 0.5)) * fw;
+	float lips = region(sp, 5, 0.45) * fw;
+	float mouth_in = region(sp, 6, 0.4) * fw;
+	float under_eye = max(region(sp, 7, 0.6), region(sp, 8, 0.6)) * fw;
+	float folds = max(region(sp, 9, 0.6), region(sp, 10, 0.6)) * fw;
+
+	float4 stx = skin_tone_tex.Sample(linearClamp, uv);
+	float3 tone_s = stx.a > 0.03 ? stx.rgb / stx.a : tone; // average colour of nearby skin only
+	float3 ts = to_ycc(tone_s);
+
+	// Protected features from the exact landmark outlines (R lips, B eyes + mouth opening,
+	// A brow band). Inside the brow band only actual brow hair (much darker than the nearby
+	// skin) is protected, so the skin around the brows is treated like the rest.
+	// Features are protected from smoothing; colour/tone changes still reach lips (half).
+	float lips_p, eyes_p, eye_core, brow_hair;
+	if (has_prot > 0.5) {
+		float4 pr = prot_tex.Sample(linearClamp, uv);
+		lips_p = saturate(pr.r * 1.5) * fw;
+		eyes_p = saturate(pr.b * 1.5) * fw;
+		eye_core = smoothstep(0.55, 0.9, pr.b) * fw; /* the eye opening itself, no soft rim */
+		brow_hair = saturate(pr.a * 1.5) * smoothstep(0.05, 0.14, ts.x - ycc_orig.x) * fw;
+	} else {
+		lips_p = lips;
+		eyes_p = eyes;
+		eye_core = eyes * 0.8;
+		brow_hair = brows * smoothstep(0.05, 0.14, ts.x - ycc_orig.x);
+	}
+	float protect = max(max(lips_p, eyes_p), brow_hair);   // smoothing keeps features crisp
+	float protect_tone = max(eye_core, lips_p * 0.5);       // tone reaches lids, brows, half the lips
+
+	// Learned segmentation, snapped to the frame's edges: R skin, G face skin, B hair, A person.
+	// One mask for every skin edit, so face, neck and hands always move together. Faint values
+	// are cut off so strong effects can't leak into the background.
+	float4 sg = seg_tex.Sample(linearClamp, uv);
+	float skin_all = has_seg > 0.5 ? smoothstep(0.12, 0.55, sg.r) : face;
+	float skin_face = has_seg > 0.5 ? smoothstep(0.12, 0.55, sg.g) : face;
+	float area = all_skin > 0.5 ? 1.0 : saturate(skin_face * 1.5);
+	float not_hair = has_seg > 0.5 ? 1.0 - smoothstep(0.2, 0.7, sg.b) : 1.0;
+	float skin_base = saturate(skin_all * area) * not_hair;
+	float skin = skin_base * (1.0 - protect);           // smoothing / foundation / shadows
+	float skin_tone_m = skin_base * (1.0 - protect_tone); // skin tone
+	float skin_lo = skin_face * (1.0 - protect);         // face skin: makeup placement
+	float skin_col = skin;
+
+	// ---------- frequency separation ----------
+	//   original = base + mid + fine   (exact, so anything outside the mask is untouched)
+	//   base : edge-preserving blur - shading and colour  -> Foundation / Skin tone / Shadows
+	//   mid  : blemishes, pores, uneven texture           -> removed by Smooth
+	//   fine : 1-2 px grain                                -> mostly kept, so skin stays real
+	float2 px1 = 1.0 / size;
+	float3 box = (image.Sample(linearClamp, uv + px1 * float2(0.75, 0.75)).rgb +
+		      image.Sample(linearClamp, uv + px1 * float2(-0.75, 0.75)).rgb +
+		      image.Sample(linearClamp, uv + px1 * float2(0.75, -0.75)).rgb +
+		      image.Sample(linearClamp, uv + px1 * float2(-0.75, -0.75)).rgb) * 0.25;
+	float3 fine = col - box;
+	float3 mid = box - sm;
+
+	float3 b = to_ycc(sm);
+	float y0 = b.x;
+
+	// Foundation: even out small colour blotches and shallow dips relative to the surrounding
+	// skin (real shadows are deeper than the clamp, so the face keeps its shape), soft glow.
+	float fa = foundation_amt * skin;
+	b.yz += clamp(ts.yz - b.yz, -0.045, 0.045) * 0.85 * fa;
+	b.x += clamp(ts.x - b.x, 0.0, 0.07) * 0.85 * fa;
+	b.x += (1.0 - b.x) * 0.10 * fa;
+
+	// Shadows (dark circles) and Degree (smile lines): fill towards the surrounding skin.
+	float lift = saturate((under_eye * pouch_amt + folds * fold_amt) * 1.2) * skin;
+	b.x += clamp(ts.x - b.x, 0.0, 0.14) * lift;
+	b.yz += clamp(ts.yz - b.yz, -0.04, 0.04) * 0.6 * lift;
+
+	// Skin tone: one operation for every skin pixel.
+	if (skin_tone_amt != 0.0) {
+		float3 tt = b;
+		if (skin_tone_amt > 0.0) {
+			float k = skin_tone_amt;
+			tt.x = b.x + (1.0 - b.x) * 0.24 * k;
+			tt.yz = 0.5 + (b.yz - 0.5) * (1.0 - 0.20 * k);
+		} else {
+			float d = -skin_tone_amt;
+			tt.x = b.x * (1.0 - 0.40 * d);
+			float ratio = tt.x / max(b.x, 0.02);
+			tt.yz = 0.5 + (b.yz - 0.5) * pow(ratio, 0.5) * (1.0 + 0.10 * d);
+			tt.y -= 0.005 * d; // a little warmer
+		}
+		b = lerp(b, tt, skin_tone_m);
+	}
+
+	// Smooth: drop the blemish band, keep most of the grain.
+	float sa = smooth_amt * skin;
+	float3 det = mid * (1.0 - 0.92 * sa) + fine * (1.0 - 0.30 * sa);
+	det *= clamp(b.x / max(y0, 0.02), 0.35, 1.0); // darker skin: texture contrast scales down too
+	col = saturate(to_rgb(b) + det);
+	ycc = to_ycc(col);
+
+	// ---------- teeth ----------
+	float sat = length(ycc.yz - 0.5);
+	float toothy = smoothstep(0.30, 0.55, ycc.x) * (1.0 - smoothstep(0.10, 0.22, sat));
+	float tm = mouth_in * toothy * teeth_amt;
+	ycc.y = lerp(ycc.y, 0.5 + (ycc.y - 0.5) * 0.25, tm);         // remove yellow
+	ycc.z = lerp(ycc.z, 0.5 + (ycc.z - 0.5) * 0.6, tm);
+	ycc.x = ycc.x + tm * 0.10;
+
+	col = saturate(to_rgb(ycc));
+
+	// ---------- makeup ----------
+	if (makeup_amt > 0.0) {
+		float3 mk = mask_tex.Sample(linearClamp, uv).rgb * fw;
+		float amt = makeup_amt;
+		float3 ycc_now = to_ycc(col);
+
+		// contour (cheek hollows, jaw, nose sides) and highlight (T-zone, cheekbones, chin)
+		float cont = max(max(region(sp, 16, 1.0), region(sp, 17, 1.0)),
+				 max(max(region(sp, 18, 1.0), region(sp, 19, 1.0)),
+				     max(region(sp, 20, 1.0), region(sp, 21, 1.0))));
+		col = lerp(col, col * float3(0.78, 0.70, 0.64), saturate(cont * skin_lo * makeup_extra.y * amt * fw * 1.3));
+		float hl = max(max(region(sp, 22, 1.0), region(sp, 23, 1.0)),
+			       max(region(sp, 24, 1.0), max(region(sp, 25, 1.0), region(sp, 26, 1.0))));
+		float hm = hl * skin_lo * makeup_extra.z * amt * fw;
+		col = 1.0 - (1.0 - col) * (1.0 - float3(1.0, 0.97, 0.92) * 0.30 * hm * hm * (3.0 - 2.0 * hm));
+
+		// blush
+		float blush = max(region(sp, 12, 1.0), region(sp, 13, 1.0)) * skin_lo * blush_color.a * amt * fw;
+		float cy = luma(col);
+		float3 bl_tint = blush_color.rgb * (cy / max(luma(blush_color.rgb), 0.1));
+		float3 bl = lerp(bl_tint, soft_light(col, blush_color.rgb), 0.3);
+		col = lerp(col, saturate(bl), saturate(blush * 1.05));
+
+		// eyeshadow (kept off the eyeball and the brows)
+		float sh = max(region(sp, 14, 0.9), region(sp, 15, 0.9)) * (1.0 - saturate(mk.b * 1.5)) *
+			   (1.0 - brows * 0.8) * shadow_color.a * amt * fw;
+		float sy = luma(col);
+		float depth = lerp(0.55, 1.0, saturate(luma(shadow_color.rgb) * 1.6));
+		float3 eshadow = shadow_color.rgb * (sy / max(luma(shadow_color.rgb), 0.1)) * depth;
+		eshadow = lerp(eshadow, soft_light(col, shadow_color.rgb), 0.25);
+		col = lerp(col, saturate(eshadow), saturate(sh * 1.3));
+
+		// eyeliner
+		col = lerp(col, col * 0.10 + float3(0.02, 0.015, 0.015), saturate(mk.g * 2.2) * saturate(makeup_extra.x * 1.3) * amt);
+
+		// brows: deepen hair pixels inside the brow regions
+		float hair = saturate((tone_ycc.x - ycc_now.x) * 6.0);
+		col = lerp(col, col * float3(0.55, 0.50, 0.47), brows * hair * makeup_extra.w * amt);
+
+		// lips: luminance-preserving tint + gloss on the lip's own highlights
+		// Inside the mouth opening never paint teeth (bright, colourless) or the dark cavity,
+		// even where the mask's soft edge reaches them.
+		float3 ycl = to_ycc(col);
+		float csat = length(ycl.yz - 0.5);
+		float teeth_px = smoothstep(0.38, 0.55, ycl.x) * (1.0 - smoothstep(0.07, 0.16, csat));
+		float cavity_px = 1.0 - smoothstep(0.10, 0.22, ycl.x);
+		float open_zone = region(sp, 6, 0.6) * fw;
+		float lip_mask = saturate(mk.r * 1.3) * (1.0 - open_zone * saturate(teeth_px + cavity_px));
+
+		// Recolour in YCbCr: take the shade's chroma, keep the lip's own light and shadow
+		// (scaled towards the shade's depth) so texture and creases survive even for bold reds.
+		float lm = lip_mask * lerp(0.75, 1.0, smoothstep(0.4, 0.95, mk.r)) * saturate(lip_color.a * 1.25) * amt;
+		float ly = ycl.x;
+		float3 lc = to_ycc(lip_color.rgb);
+		float target_y = ly * lerp(1.0, lc.x / 0.40, 0.65);
+		float3 lipc = saturate(to_rgb(float3(target_y, lc.y, lc.z)));
+		lipc = lerp(lipc, soft_light(col, lip_color.rgb), 0.15);
+		col = lerp(col, lipc, lm);
+		float spec = saturate((ly - luma(tone) - 0.02) * 5.0) * lip_gloss * lip_mask * amt;
+		col += spec * 0.40 * float3(1.0, 0.97, 0.97);
+	}
+
+	// ---------- bright eyes + clarity (unsharp mask from a small box blur) ----------
+	float2 t = 1.0 / size;
+	float3 blur = (image.Sample(linearClamp, uv + t * float2(1.5, 1.5)).rgb +
+		       image.Sample(linearClamp, uv + t * float2(-1.5, 1.5)).rgb +
+		       image.Sample(linearClamp, uv + t * float2(1.5, -1.5)).rgb +
+		       image.Sample(linearClamp, uv + t * float2(-1.5, -1.5)).rgb) * 0.25;
+	float3 detail = orig.rgb - blur;
+	float el = eyes * eyelight_amt;
+	col += detail * el * 1.6;
+	col *= 1.0 + el * 0.10;
+
+	float ca = clarity_amt * max(face, 0.35 * all_skin) * (1.0 - smooth_amt * skin * 0.7);
+	col += detail * ca * 1.2;
+	col = lerp(col, tone + (col - tone) * 1.18, clarity_amt * face * 0.6);
+
+	col = saturate(col);
+
+	// ---------- light: whole-body virtual lighting ----------
+	// Surface normals come from the person mask: blurred, it is a soft "inflated silhouette"
+	// height field whose slope tilts the normal outwards towards the body's edges. Inside the
+	// face we blend in an ellipsoid fitted to the landmarks for proper facial modelling.
+	// The light direction is in image space (x right, y down, z towards the camera).
+	if (light_amt > 0.0) {
+		float la = light_amt;
+		float3 L = normalize(light_dir.xyz);
+
+		float person;
+		float3 n = float3(0.0, 0.0, 1.0);
+		if (has_person > 0.5) {
+			person = person_tex.Sample(linearClamp, uv).a;
+			float2 o = person_texel * 3.0;
+			float hx = person_blur.Sample(linearClamp, uv + float2(o.x, 0.0)).a -
+				   person_blur.Sample(linearClamp, uv - float2(o.x, 0.0)).a;
+			float hy = person_blur.Sample(linearClamp, uv + float2(0.0, o.y)).a -
+				   person_blur.Sample(linearClamp, uv - float2(0.0, o.y)).a;
+			n = normalize(float3(-hx * 3.5, -hy * 3.5, 0.55));
+		} else {
+			person = max(region(sp, 27, 0.55), region(sp, 28, 0.6)) * fw;
+		}
+
+		if (fw > 0.0) {
+			float4 fa = data_tex.Load(int3(128, 0, 0));   // face ellipse: centre, radii
+			float4 fb = data_tex.Load(int3(129, 0, 0));   // (cos, sin) of head roll
+			float2 q = sp - fa.xy;
+			float2 l = float2(q.x * fb.x + q.y * fb.y, -q.x * fb.y + q.y * fb.x) / max(fa.zw, 1.0);
+			l.y *= 0.92;
+			float r = length(l);
+			float face_m = (1.0 - smoothstep(0.75, 1.2, r)) * fw;
+			float rn = min(r, 1.0);
+			float2 ln = l / max(r, 1.0);
+			float3 nf = normalize(float3(ln.x, ln.y, sqrt(saturate(1.0 - rn * rn)) * 1.15 + 0.08));
+			// face-local -> image space
+			nf.xy = float2(nf.x * fb.x - nf.y * fb.y, nf.x * fb.y + nf.y * fb.x);
+			n = normalize(lerp(n, nf, face_m));
+			person = max(person, face_m);
+		}
+
+		float lam = saturate(dot(n, L));
+		float3 key = 1.0 + light_key.rgb * (lam * lam) * light_key.a * 0.9 * person * la;
+		float shade = 1.0 - light_misc.x * (1.0 - lam) * person * la * 0.7;
+		col = col * key * shade;
+
+		// rim light: hugs the silhouette on the side away from the key
+		float2 rim_side = normalize(float2(-L.x, L.y * 0.5) + float2(0.0001, 0.0));
+		float edge = pow(saturate(1.0 - n.z), 1.6);
+		float rim_dir = saturate(dot(normalize(n.xy + 0.0001), rim_side) * 0.8 + 0.3);
+		col += light_rim.rgb * edge * rim_dir * person * light_rim.a * 0.7 * la;
+
+		// background: dimmed outside the real silhouette
+		col *= 1.0 - light_misc.y * (1.0 - person) * la;
+		col *= exp2(light_misc.z * la * 0.6);
+		col.r *= 1.0 + light_misc.w * 0.10 * la;
+		col.b *= 1.0 - light_misc.w * 0.10 * la;
+		col = saturate(col);
+	}
+
+	// ---------- filter (colour grade + LUT) on the whole frame ----------
+	if (filter_amt > 0.0)
+		col = lerp(col, grade(col), filter_amt);
+	if (filter_lut_amt > 0.0)
+		col = lerp(col, apply_filter_lut(col), filter_lut_amt);
+
+	if (debug_view == 3) {
+		float3 mk = mask_tex.Sample(linearClamp, uv).rgb;
+		float cont = max(max(region(sp, 16, 1.0), region(sp, 17, 1.0)),
+				 max(max(region(sp, 18, 1.0), region(sp, 19, 1.0)),
+				     max(region(sp, 20, 1.0), region(sp, 21, 1.0))));
+		float hl = max(max(region(sp, 22, 1.0), region(sp, 23, 1.0)),
+			       max(region(sp, 24, 1.0), max(region(sp, 25, 1.0), region(sp, 26, 1.0))));
+		float bl = max(region(sp, 12, 1.0), region(sp, 13, 1.0));
+		float sh = max(region(sp, 14, 0.9), region(sp, 15, 0.9));
+		col = luma(orig.rgb) * 0.35 + float3(mk.r + bl * 0.6, mk.g + hl * 0.5, mk.b + sh * 0.6) +
+		      float3(cont, cont * 0.6, 0.0) * 0.4;
+	} else if (debug_view == 1)
+		col = float3(skin, skin, skin);
+	else if (debug_view == 2) {
+		col = col * 0.6 + float3(face, 0.0, 0.0) * 0.25 + float3(0.0, eyes + brows, 0.0) * 0.4 +
+		      float3(0.0, 0.0, lips + mouth_in) * 0.5 + float3(under_eye + folds, under_eye + folds, 0.0) * 0.4;
+	}
+
+	return float4(col, orig.a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSMain(v_in);
+	}
+}

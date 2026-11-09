@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows x64 (ONNX Runtime + DirectML)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .deps
+            data/models/*.onnx
+          key: deps-windows-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -C Release -B dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: obs-beauty-windows-x64
+          path: dist/*.zip
+
+  macos:
+    name: macOS arm64 (Apple Vision)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OBS (we link against OBS.app)
+        run: brew install --cask obs
+      - uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-macos-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+      - name: Build
+        run: cmake --build build
+      - name: Package
+        run: cd build && zip -qry ../obs-beauty-macos-arm64.zip obs-beauty.plugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: obs-beauty-macos-arm64
+          path: obs-beauty-macos-arm64.zip
