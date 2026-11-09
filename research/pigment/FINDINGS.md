@@ -106,3 +106,31 @@ skin's texture shows through, shine and pixels much darker than the skin (glasse
 stubble) are left alone. Over the whole skin: structure corr ≥ 0.997, shadow depth
 0.998 – 1.004 at full strength; at preset strength the colour change matches the old paint blush.
 
+## Makeup
+
+All colour makeup now goes through one operator in OD, `deposit()` in `beauty-final.effect`:
+
+- **scatter**: the surface takes on the product's colour, measured against its own local colour
+  (lips: the edge-preserving base; skin: the skin-weighted local average), so its colour texture
+  survives
+- **film**: a translucent tinted layer
+- **value**: brightness moves by the product's difference from a reference albedo (a typical lip /
+  medium skin). Multiplicative, so it is the same in light and shadow.
+
+A lip's brightness relative to the surrounding skin is mostly lighting (day −0.25, night +0.76 OD),
+so value can't be referenced to the skin. Lifts are rolled off (`soft_lift`, ≤ ~1.7× per channel)
+so bold colours don't go neon on lit spots.
+
+| product | scatter / film / value | other |
+|---|---|---|
+| lipstick | 0.90 / 0.15 / 0.65 | only on face-skin (a lip outline drifting onto a pillow is cut) |
+| eyeshadow | 0.80 / 0.20 / 0.55 | lifts at most 0.12 OD |
+| blush | 0.65 / 0.19 / 0 | see above |
+| contour | film of 0.48·shading + 0.93·the user's melanin | a shadow in their own brown |
+| highlight | adds light ∝ the light already falling there (smooth base) | glows on lit planes, quiet in shadow |
+
+Eyeliner (opaque gel) and brows (already a multiplicative darkening of hair pixels) are unchanged.
+Colour-texture correlation in the product's area (1.5 px high-pass of OD chroma), old → new:
+lips 0.54–0.76 → 0.64–0.97, eyeshadow 0.62–0.79 → 0.81–0.92; luma texture equal or better.
+Bold red at night is the one exception (0.73 → 0.68).
+

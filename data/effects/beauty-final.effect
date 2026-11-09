@@ -111,6 +111,54 @@ float3 lin2srgb(float3 c)
 		    step(c, float3(0.0031308, 0.0031308, 0.0031308)));
 }
 
+// ---- makeup as pigment (optical density, OD = -log linear RGB) ----
+// Brightness in OD is the (1,1,1)/sqrt3 axis - where light and shadow live; the rest is colour.
+float3 od_of(float3 srgb)
+{
+	return -log(max(srgb2lin(srgb), float3(0.001, 0.001, 0.001)));
+}
+
+float od_bright(float3 od)
+{
+	return dot(od, float3(0.57735027, 0.57735027, 0.57735027));
+}
+
+float3 od_chroma(float3 od)
+{
+	return od - od_bright(od) * float3(0.57735027, 0.57735027, 0.57735027);
+}
+
+// 0 on specular shine (bright, colourless): a reflection off the surface, never re-tinted.
+float shine_keep(float3 lin)
+{
+	float ll = dot(lin, float3(0.2126, 0.7152, 0.0722));
+	float lsat = max(lin.r, max(lin.g, lin.b)) - min(lin.r, min(lin.g, lin.b));
+	return 1.0 - saturate((ll - 0.45) / 0.25) * saturate(1.0 - lsat / max(ll, 0.001) / 0.35);
+}
+
+// A cosmetic layer, as an OD change:
+//   scatter - the surface takes on the product's colour, measured against its own local colour
+//             (od_ref), so its colour texture survives
+//   film    - a translucent tinted layer (absorbs, like a stain)
+//   value   - brightness moves by the product's difference from a reference albedo (od_val_ref);
+//             multiplicative, so it is the same in light and shadow
+float3 deposit(float3 od_ref, float3 od_c, float3 od_val_ref, float scatter, float film, float value)
+{
+	float3 c = od_chroma(od_c);
+	return scatter * (c - od_chroma(od_ref)) + film * (c + 0.15 * od_bright(od_c) * float3(0.57735027, 0.57735027, 0.57735027)) +
+	       value * (od_bright(od_c) - od_bright(od_val_ref)) * float3(0.57735027, 0.57735027, 0.57735027);
+}
+
+// A pigment layer can only reflect so much more than the surface under it: lifts (negative OD)
+// pass up to 0.15, then roll off towards 0.55 (about 1.7x) so bold colours never go neon on
+// brightly lit spots.
+float3 soft_lift(float3 d)
+{
+	float3 k = float3(0.15, 0.15, 0.15);
+	float3 over = min(d + k, float3(0.0, 0.0, 0.0)); /* how far past the knee (<= 0) */
+	return max(d, -k) + (-0.4 * (1.0 - exp(over / 0.4)));
+}
+
 // Soft ellipse mask for region `idx`; 0 when the region is unused.
 float region(float2 p, int idx, float feather)
 {
@@ -353,11 +401,24 @@ float4 PSMain(VertData v_in) : TARGET
 		float cont = max(max(region(sp, 16, 1.0), region(sp, 17, 1.0)),
 				 max(max(region(sp, 18, 1.0), region(sp, 19, 1.0)),
 				     max(region(sp, 20, 1.0), region(sp, 21, 1.0))));
-		col = lerp(col, col * float3(0.78, 0.70, 0.64), saturate(cont * skin_lo * makeup_extra.y * amt * fw * 1.3));
+		// not on things much darker than the surrounding skin (glasses frames, stubble, hair)
+		float on_skin = 1.0 - smoothstep(0.15, 0.30, ts.x - luma(col));
+		// contour: a shadow in the user's own skin brown (their calibrated melanin direction)
+		float cw = saturate(cont * skin_lo * makeup_extra.y * amt * fw * 1.3) * on_skin;
+		if (cw > 0.0) {
+			float3 lin = srgb2lin(col);
+			float3 d = 0.48 * float3(0.57735027, 0.57735027, 0.57735027) + 0.93 * pig_mel;
+			col = lin2srgb(lin * exp(-d * cw * shine_keep(lin)));
+		}
+		// highlight: light caught by the product - added in proportion to the light already
+		// falling there (smooth base), so it glows on lit planes and stays quiet in shadow
 		float hl = max(max(region(sp, 22, 1.0), region(sp, 23, 1.0)),
 			       max(region(sp, 24, 1.0), max(region(sp, 25, 1.0), region(sp, 26, 1.0))));
 		float hm = hl * skin_lo * makeup_extra.z * amt * fw;
-		col = 1.0 - (1.0 - col) * (1.0 - float3(1.0, 0.97, 0.92) * 0.30 * hm * hm * (3.0 - 2.0 * hm));
+		if (hm > 0.0) {
+			float e = dot(srgb2lin(sm), float3(0.2126, 0.7152, 0.0722));
+			col = lin2srgb(srgb2lin(col) + float3(1.0, 0.94, 0.85) * (0.42 * e * hm * hm * (3.0 - 2.0 * hm)));
+		}
 
 		// blush: in optical density, move the cheek's colour (the chromatic plane, relative to
 		// the surrounding skin) towards the blush colour. Brightness - shading, shadows, the
@@ -365,33 +426,32 @@ float4 PSMain(VertData v_in) : TARGET
 		// a soft wash a little wider than the cheek ellipse; never on things much darker than
 		// the surrounding skin (glasses frames, stubble, hair)
 		float blush = max(region_scaled(sp, 12, 1.0, 1.3), region_scaled(sp, 13, 1.0, 1.3)) * skin_lo *
-			      blush_color.a * amt * fw * (1.0 - smoothstep(0.15, 0.30, ts.x - luma(col)));
+			      blush_color.a * amt * fw * on_skin;
 		if (blush > 0.0) {
-			float3 U3 = float3(0.57735027, 0.57735027, 0.57735027);
+			// Powder blush both scatters (the cheek takes the blush's colour) and absorbs (a thin
+			// tinted film). Colour-only turns pastels mauve on darker skin, film-only turns every
+			// pink sunburn-red; 65/35 reads as a natural rose. Brightness isn't moved.
 			float3 lin = srgb2lin(col);
 			float3 od = -log(max(lin, 0.001));
-			float3 od_ref = has_sod ? od_low : od;
-			float3 od_bl = -log(max(srgb2lin(blush_color.rgb), 0.001));
-			// Powder blush both scatters (the cheek takes the blush's colour) and absorbs (a thin
-			// tinted film over the skin). Colour-only would turn pastels mauve on darker skin,
-			// film-only turns every pink sunburn-red; 65/35 reads as a natural rose.
-			float3 bl_c = od_bl - dot(od_bl, U3) * U3;
-			float3 d = 0.65 * (bl_c - (od_ref - dot(od_ref, U3) * U3)) +
-				   0.35 * 0.53 * (bl_c + 0.15 * dot(od_bl, U3) * U3);
-			float ll = dot(lin, float3(0.2126, 0.7152, 0.0722));
-			float lsat = max(lin.r, max(lin.g, lin.b)) - min(lin.r, min(lin.g, lin.b));
-			float keep = 1.0 - saturate((ll - 0.45) / 0.25) * saturate(1.0 - lsat / max(ll, 0.001) / 0.35);
-			col = lin2srgb(exp(-(od + d * (1.05 * saturate(blush) * keep))));
+			float3 d = deposit(has_sod ? od_low : od, od_of(blush_color.rgb), od, 0.65, 0.1855, 0.0);
+			col = lin2srgb(exp(-(od + d * (1.05 * saturate(blush) * shine_keep(lin)))));
 		}
 
 		// eyeshadow (kept off the eyeball and the brows)
 		float sh = max(region(sp, 14, 0.9), region(sp, 15, 0.9)) * (1.0 - saturate(mk.b * 1.5)) *
 			   (1.0 - brows * 0.8) * shadow_color.a * amt * fw;
-		float sy = luma(col);
-		float depth = lerp(0.55, 1.0, saturate(luma(shadow_color.rgb) * 1.6));
-		float3 eshadow = shadow_color.rgb * (sy / max(luma(shadow_color.rgb), 0.1)) * depth;
-		eshadow = lerp(eshadow, soft_light(col, shadow_color.rgb), 0.25);
-		col = lerp(col, saturate(eshadow), saturate(sh * 1.3));
+		float shw = saturate(sh * 1.3) * on_skin;
+		if (shw > 0.0) {
+			// powder on the lid: takes the shadow's colour against the lid's own; darker shades
+			// deepen it (relative to a medium skin albedo), lighter ones barely lift it
+			float3 lin = srgb2lin(col);
+			float3 od = -log(max(lin, 0.001));
+			float3 d = deposit(has_sod ? od_low : od_of(sm), od_of(shadow_color.rgb), od_of(float3(0.69, 0.50, 0.42)), 0.80,
+					   0.20, 0.55);
+			d += max(-0.12 - od_bright(d), 0.0) * float3(0.57735027, 0.57735027, 0.57735027); /* lift <= 0.12 OD */
+			d = soft_lift(d);
+			col = lin2srgb(exp(-(od + d * (shw * shine_keep(lin)))));
+		}
 
 		// eyeliner
 		col = lerp(col, col * 0.10 + float3(0.02, 0.015, 0.015), saturate(mk.g * 2.2) * saturate(makeup_extra.x * 1.3) * amt);
@@ -409,16 +469,23 @@ float4 PSMain(VertData v_in) : TARGET
 		float cavity_px = 1.0 - smoothstep(0.10, 0.22, ycl.x);
 		float open_zone = region(sp, 6, 0.6) * fw;
 		float lip_mask = saturate(mk.r * 1.3) * (1.0 - open_zone * saturate(teeth_px + cavity_px));
+		// only on the face (the segmenter labels lips as face skin): a lip outline that drifts past
+		// the chin must not colour what is below it (a pillow reads as clothes, a hand as body)
+		if (has_seg > 0.5)
+			lip_mask *= smoothstep(0.15, 0.50, sg.g);
 
-		// Recolour in YCbCr: take the shade's chroma, keep the lip's own light and shadow
-		// (scaled towards the shade's depth) so texture and creases survive even for bold reds.
+		// Lipstick as pigment: the lip takes the shade's colour against its own local colour (so
+		// its colour variation survives), its brightness moves by the shade's difference from a
+		// natural lip - multiplicatively, so creases, shading and the lip's light are kept.
 		float lm = lip_mask * lerp(0.75, 1.0, smoothstep(0.4, 0.95, mk.r)) * saturate(lip_color.a * 1.25) * amt;
 		float ly = ycl.x;
-		float3 lc = to_ycc(lip_color.rgb);
-		float target_y = ly * lerp(1.0, lc.x / 0.40, 0.65);
-		float3 lipc = saturate(to_rgb(float3(target_y, lc.y, lc.z)));
-		lipc = lerp(lipc, soft_light(col, lip_color.rgb), 0.15);
-		col = lerp(col, lipc, lm);
+		if (lm > 0.0) {
+			float3 lin = srgb2lin(col);
+			float3 od = -log(max(lin, 0.001));
+			float3 d = deposit(od_of(sm), od_of(lip_color.rgb), od_of(float3(0.61, 0.34, 0.33)), 0.90, 0.15, 0.65);
+			d = soft_lift(d);
+			col = lin2srgb(exp(-(od + d * (lm * lerp(0.4, 1.0, shine_keep(lin))))));
+		}
 		float spec = saturate((ly - luma(tone) - 0.02) * 5.0) * lip_gloss * lip_mask * amt;
 		col += spec * 0.40 * float3(1.0, 0.97, 0.97);
 	}
