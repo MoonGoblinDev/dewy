@@ -94,6 +94,11 @@ jobs:
           rm -f "$RUNNER_TEMP/certs.p12"
           security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          # Apple's Developer ID G2 intermediate: without it the identities count as untrusted
+          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
+          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN" || true
+          echo "Identities in the certificate:"
+          security find-identity "$KEYCHAIN" | sed -nE 's/.*"(.*)".*/  \1/p' | sort -u
           app=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -nE 's/.*"(Developer ID Application: [^"]+)".*/\1/p' | head -1)
           inst=$(security find-identity -v "$KEYCHAIN" | sed -nE 's/.*"(Developer ID Installer: [^"]+)".*/\1/p' | head -1)
           if [[ -z "$app" ]]; then
