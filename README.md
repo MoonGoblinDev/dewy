@@ -5,9 +5,10 @@ regular video filter, with no virtual camera. Skin smoothing, tone, face reshapi
 stickers, ambience, colour filters and virtual studio lighting, all controlled from one dock.
 
 <p align="center">
-  <img src="docs/media/demo.webp" alt="Dewy demo: original on the left, Dewy on the right, stepping through smoothing, foundation, skin tone, reshaping, makeup, studio light and a colour filter" width="900">
+  <img src="docs/media/demo.webp" alt="Dewy demo: a slider panel on the left raises one slider at a time (smooth, foundation, redness, skin tone, slim face, bigger eyes, bright eyes, Rose makeup, Soft Box light, Fresh filter) while the right shows Dewy on top and the original camera below" width="960">
 </p>
-<p align="center"><a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 30 s)</a></p>
+<p align="center">Each slider rises one at a time: Dewy on top, the original camera below.<br>
+<a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 30 s)</a></p>
 
 ![OBS with the Dewy dock: a streamer in the preview, the Enhance tab showing Smooth, Foundation, Skin tone and Redness sliders](docs/media/obs-dewy.png)
 
