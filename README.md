@@ -21,7 +21,6 @@ https://github.com/user-attachments/assets/15238be5-787a-48c5-b02a-7659ed85f954
 <p align="center">The real Dewy dock in OBS: skin and reshape sliders, makeup, stickers, ambience, filters and light,
 then one-click presets and saving your own look. Dewy on top, the original camera below.</p>
 
-![OBS with the Dewy dock: a streamer in the preview with the Dewy look applied, and the dock's Presets tab](docs/media/obs-dewy.png)
 
 ## Why Dewy
 
