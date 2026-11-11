@@ -47,6 +47,11 @@ if(NOT EXISTS "${FRONTEND_DIR}/obs-frontend-api.h")
   file(DOWNLOAD "https://raw.githubusercontent.com/obsproject/obs-studio/${OBS_VERSION}/frontend/api/obs-frontend-api.h"
        "${FRONTEND_DIR}/obs-frontend-api.h")
 endif()
+set(WEBSOCKET_DIR "${DEPS}/obs-websocket")
+if(NOT EXISTS "${WEBSOCKET_DIR}/obs-websocket-api.h")
+  file(DOWNLOAD "https://raw.githubusercontent.com/obsproject/obs-websocket/5.5.4/lib/obs-websocket-api.h"
+       "${WEBSOCKET_DIR}/obs-websocket-api.h")
+endif()
 set(OBS_GEN_DIR "${CMAKE_BINARY_DIR}/obs-generated")
 file(WRITE "${OBS_GEN_DIR}/obsconfig.h" "#pragma once\n#define OBS_RELEASE_CANDIDATE 0\n#define OBS_BETA 0\n")
 
@@ -129,7 +134,7 @@ else()
 endif()
 target_include_directories(dewy PRIVATE "${ORT_INCLUDE}")
 
-target_include_directories(dewy PRIVATE "${OBS_SRC}/libobs" "${OBS_GEN_DIR}" "${FRONTEND_DIR}" src src/tracker)
+target_include_directories(dewy PRIVATE "${OBS_SRC}/libobs" "${OBS_GEN_DIR}" "${FRONTEND_DIR}" "${WEBSOCKET_DIR}" src src/tracker)
 target_compile_definitions(dewy PRIVATE PLUGIN_VERSION="${PROJECT_VERSION}" BEAUTY_HAVE_LIBOBS)
 
 if(MSVC)

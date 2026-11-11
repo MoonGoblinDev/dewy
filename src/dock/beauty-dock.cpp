@@ -27,6 +27,7 @@
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QVBoxLayout>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,7 @@
 #include "thumbs.hpp"
 #include "beauty-api.h"
 #include "presets.h"
+#include <obs-websocket-api.h>
 
 using namespace beauty;
 
@@ -153,6 +155,23 @@ public:
 		customPanel->setVisible(open);
 		refresh();
 	}
+	void showAtmoSub(int i)
+	{
+		if (i < 0 || i >= (int)atmoTabs.size())
+			return;
+		atmoTabs[i]->setChecked(true);
+		atmoStack->setCurrentIndex(i);
+	}
+	/* Automation (obs-websocket vendor requests): bring a control into view.
+	 * Targets: a slider key ("smooth", "face_slim"), "look:<name>", or "<setting>:<preset name>"
+	 * ("effect_preset:Kitty", "atmo_preset:Sparkles", "filter_preset:Fresh", "light_preset:Neon"). */
+	bool hasFocusTarget(const std::string &t) const { return focusers.count(t) != 0; }
+	void focusTarget(const std::string &t)
+	{
+		auto it = focusers.find(t);
+		if (it != focusers.end())
+			it->second();
+	}
 
 private:
 	/* filter access */
@@ -209,6 +228,17 @@ private:
 	std::vector<ThumbJob> thumbJobs;
 	TopTabs *topTabs = nullptr;
 	std::vector<QPushButton *> subTabs;
+	std::vector<QPushButton *> atmoTabs;
+	QStackedWidget *atmoStack = nullptr;
+	std::map<std::string, std::function<void()>> focusers;
+	void reveal(int page, QWidget *w)
+	{
+		QPointer<QWidget> pw(w);
+		QTimer::singleShot(30, this, [this, page, pw]() {
+			if (pw)
+				pageScrolls[page]->ensureWidgetVisible(pw, 0, 90);
+		});
+	}
 	QStackedWidget *enhanceStack = nullptr;
 	std::vector<QScrollArea *> pageScrolls;
 	QTimer *thumbTimer = nullptr;
@@ -580,6 +610,11 @@ QWidget *BeautyDock::sliderSection(const Opt &o)
 	row->onChanged = [this, key](int val) { setInt(key, val); };
 	refreshers.push_back([this, row, key]() { row->setValue((int)getInt(key)); });
 	v->addWidget(row);
+	focusers[key] = [this, w]() {
+		showTab(0);
+		showEnhanceSub(0);
+		reveal(0, w);
+	};
 	return w;
 }
 
@@ -631,6 +666,14 @@ QWidget *BeautyDock::categorySection(const FeatureGroup &c)
 		buttons[state->selected]->setModified(val != o.def);
 	};
 	refreshers.push_back([apply, buttons]() { apply(buttons); });
+	for (size_t i = 0; i < c.opts.size(); i++)
+		focusers[c.opts[i].key] = [this, w, state, i, apply, buttons]() {
+			showTab(0);
+			showEnhanceSub(0);
+			state->selected = (int)i;
+			apply(buttons);
+			reveal(0, w);
+		};
 
 	v->addWidget(chips);
 	v->addWidget(row);
@@ -918,6 +961,11 @@ QWidget *BeautyDock::buildMakeup()
 		auto *t = new LookTile(l, grid);
 		flow->addWidget(t);
 		lookTiles.push_back(t);
+		focusers["look:" + l.name.toStdString()] = [this, t]() {
+			showTab(0);
+			showEnhanceSub(1);
+			reveal(0, t);
+		};
 		if (l.custom) {
 			t->onClicked = [this]() {
 				customPanel->setVisible(!customPanel->isVisible());
@@ -1076,6 +1124,11 @@ QWidget *BeautyDock::presetSections(int page, obs_data_t *root, const char *item
 		for (obs_data_t *d : items)
 			gi.push_back({QString::fromUtf8(obs_data_get_string(d, "name")), QImage()});
 		grid->setItems(gi);
+		for (auto &it : gi)
+			focusers[std::string(settingKey) + ":" + it.name.toStdString()] = [this, page, grid, n = it.name]() {
+				showTab(page);
+				reveal(page, grid->tileNamed(n));
+			};
 		grid->onPicked = [this, settingKey](const QString &n) { setString(settingKey, n.toUtf8().constData()); };
 		refreshers.push_back([this, grid, settingKey]() {
 			grid->setSelected(QString::fromStdString(getString(settingKey)));
@@ -1103,6 +1156,14 @@ PresetGrid *BeautyDock::simpleGrid(int page, obs_data_t *root, const char *items
 		gi.push_back({d ? QString::fromUtf8(obs_data_get_string(d, "name")) : QStringLiteral("None"),
 			      d ? QImage() : noneThumb(128)});
 	grid->setItems(gi);
+	int sub = strcmp(settingKey, "motion_preset") == 0 ? 1 : 0;
+	for (auto &it : gi)
+		focusers[std::string(settingKey) + ":" + it.name.toStdString()] = [this, page, sub, grid, n = it.name]() {
+			showTab(page);
+			if (page == 2)
+				showAtmoSub(sub);
+			reveal(page, grid->tileNamed(n));
+		};
 	grid->onPicked = [this, settingKey](const QString &n) {
 		setString(settingKey, n == "None" ? "" : n.toUtf8().constData());
 	};
@@ -1126,8 +1187,8 @@ QWidget *BeautyDock::buildAtmosphere()
 	v->setContentsMargins(0, 0, 0, 0);
 	v->setSpacing(0);
 	auto *stack = new QStackedWidget(page);
-	std::vector<QPushButton *> btns;
-	v->addWidget(subTabRow(page, {"Ambience", "Motion"}, btns, [stack](int i) { stack->setCurrentIndex(i); }));
+	atmoStack = stack;
+	v->addWidget(subTabRow(page, {"Ambience", "Motion"}, atmoTabs, [stack](int i) { stack->setCurrentIndex(i); }));
 	struct Sub {
 		const char *items, *key, *amtKey;
 		int def;
@@ -1444,9 +1505,58 @@ void BeautyDock::snapshotIfRequested()
 
 /* ---------------- registration (called from plugin-main.c) ---------------- */
 
+/* obs-websocket vendor "dewy": drive the dock from scripts, Stream Deck or demos.
+ *   CallVendorRequest {vendorName: "dewy", requestType: "show",  requestData: {tab: "effects", sub: "motion"}}
+ *   CallVendorRequest {vendorName: "dewy", requestType: "focus", requestData: {target: "face_slim"}}
+ * Requests arrive on obs-websocket's thread; the dock is touched on the UI thread. */
+static QPointer<BeautyDock> g_dock;
+
+static void vendor_show(obs_data_t *req, obs_data_t *res, void *)
+{
+	static const char *tabs[] = {"enhance", "effects", "atmosphere", "filters", "light"};
+	std::string tab = obs_data_get_string(req, "tab"), sub = obs_data_get_string(req, "sub");
+	int ti = -1;
+	for (int i = 0; i < 5; i++)
+		if (tab == tabs[i])
+			ti = i;
+	obs_data_set_bool(res, "ok", ti >= 0 && g_dock);
+	if (ti < 0 || !g_dock)
+		return;
+	QMetaObject::invokeMethod(g_dock, [ti, sub]() {
+		if (!g_dock)
+			return;
+		g_dock->showTab(ti);
+		if (sub == "appearance" || sub == "makeup")
+			g_dock->showEnhanceSub(sub == "makeup" ? 1 : 0);
+		if (sub == "ambience" || sub == "motion")
+			g_dock->showAtmoSub(sub == "motion" ? 1 : 0);
+		if (sub == "customise")
+			g_dock->setCustomOpen(true);
+	}, Qt::QueuedConnection);
+}
+
+static void vendor_focus(obs_data_t *req, obs_data_t *res, void *)
+{
+	std::string target = obs_data_get_string(req, "target");
+	bool ok = g_dock && g_dock->hasFocusTarget(target); /* the map is fixed after construction */
+	obs_data_set_bool(res, "ok", ok);
+	if (ok)
+		QMetaObject::invokeMethod(g_dock, [target]() {
+			if (g_dock)
+				g_dock->focusTarget(target);
+		}, Qt::QueuedConnection);
+}
+
 extern "C" void beauty_dock_register(void)
 {
 	auto *dock = new BeautyDock();
-	if (!obs_frontend_add_dock_by_id("obs-beauty-dock", obs_module_text("Dewy"), dock) /* id kept: saved dock layouts */)
+	if (!obs_frontend_add_dock_by_id("obs-beauty-dock", obs_module_text("Dewy"), dock) /* id kept: saved dock layouts */) {
 		delete dock;
+		return;
+	}
+	g_dock = dock;
+	if (obs_websocket_vendor v = obs_websocket_register_vendor("dewy")) {
+		obs_websocket_vendor_register_request(v, "show", vendor_show, nullptr);
+		obs_websocket_vendor_register_request(v, "focus", vendor_focus, nullptr);
+	}
 }

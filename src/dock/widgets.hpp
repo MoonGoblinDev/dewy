@@ -303,6 +303,13 @@ public:
 	void setPanel(QWidget *panel) { inlinePanel = panel; }
 	std::function<void(const QString &)> onPicked;
 	const std::vector<Item> &itemList() const { return items; }
+	QWidget *tileNamed(const QString &name) const
+	{
+		for (size_t i = 0; i < items.size() && i < tiles.size(); i++)
+			if (items[i].name == name)
+				return (QWidget *)tiles[i];
+		return nullptr;
+	}
 
 private:
 	void relayout();

@@ -5,10 +5,11 @@ regular video filter, with no virtual camera. Skin smoothing, tone, face reshapi
 stickers, ambience, colour filters and virtual studio lighting, all controlled from one dock.
 
 <p align="center">
-  <img src="docs/media/demo.webp" alt="Dewy demo: a slider panel on the left raises one slider at a time (smooth, foundation, redness, skin tone, slim face, bigger eyes, bright eyes, Rose makeup, Soft Box light, Fresh filter) while the right shows Dewy on top and the original camera below" width="960">
+  <img src="docs/media/demo.webp" alt="Dewy demo: the real Dewy dock in OBS on the left goes through skin sliders, reshaping, makeup looks, stickers, ambience, filters and lights, while the right shows Dewy on top and the original camera below" width="1280">
 </p>
-<p align="center">Each slider rises one at a time: Dewy on top, the original camera below.<br>
-<a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 30 s)</a></p>
+<p align="center">The real Dewy dock driving the filter live in OBS: skin, reshaping, makeup, stickers, ambience,
+filters and light. Dewy on top, the original camera below.<br>
+<a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 1080p, 1 min)</a></p>
 
 ![OBS with the Dewy dock: a streamer in the preview, the Enhance tab showing Smooth, Foundation, Skin tone and Redness sliders](docs/media/obs-dewy.png)
 
@@ -130,6 +131,24 @@ python3 tools/obsctl.py shot "Video Capture Device" out.png 1280
 - C, Objective-C and preset JSON changes need an OBS restart.
 - To render every dock tab to PNG, create
   `~/Library/Application Support/obs-studio/plugin_config/dewy/snapshot/` and restart OBS.
+
+### Automating the dock
+
+Dewy registers an obs-websocket vendor, `dewy`, so scripts, Stream Deck or demo tools can drive the dock
+(the filter's settings themselves are set with the regular `SetSourceFilterSettings`):
+
+```json
+{"requestType": "CallVendorRequest", "requestData": {"vendorName": "dewy", "requestType": "show",
+  "requestData": {"tab": "atmosphere", "sub": "motion"}}}
+{"requestType": "CallVendorRequest", "requestData": {"vendorName": "dewy", "requestType": "focus",
+  "requestData": {"target": "face_slim"}}}
+```
+
+- `show`: `tab` is `enhance`, `effects`, `atmosphere`, `filters` or `light`. The optional `sub` is
+  `appearance`, `makeup`, `customise`, `ambience` or `motion`.
+- `focus` brings a control into view. `target` is a slider key (`smooth`, `face_slim`, `eye_size`, …),
+  `look:<name>` (`look:Rose`), or `<setting>:<preset>` (`effect_preset:Kitty`, `atmo_preset:Sparkles`,
+  `filter_preset:Fresh`, `light_preset:Neon`). The response is `{"ok": true}` when the target exists.
 
 ### Adding content
 
