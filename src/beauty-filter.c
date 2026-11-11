@@ -89,6 +89,8 @@ struct beauty_filter {
 	uint32_t dup_sig[DUP_GRID * DUP_GRID];
 	bool dup_have;
 	uint64_t content_last, fresh_ns, log_content;
+	volatile bool snap_request;     /* the dock wants a frame for its thumbnails */
+	volatile uint32_t snap_serial;  /* bumped on every snapshot */
 #define CMAP_N 16
 	uint64_t cmap_frame[CMAP_N], cmap_content[CMAP_N];
 	gs_texture_t *person_tex;
@@ -517,7 +519,8 @@ static void update_tracking(struct beauty_filter *f, gs_texture_t *src, uint32_t
 				sent = face_tracker_submit_bgra(f->tracker, ptr, linesize, sw, sh, cid, now);
 			}
 			cmap_put(f, f->stage_id[prev], cid);
-			if (fresh && f->stage_id[prev] % 15 == 0) { /* ~4x a second is plenty for thumbnails */
+			if (f->snap_request) { /* one frame, only when the dock asks (a tab was opened) */
+				f->snap_request = false;
 				pthread_mutex_lock(&f->snap_mutex);
 				if (f->snap_w != sw || f->snap_h != sh) {
 					bfree(f->snap);
@@ -528,6 +531,7 @@ static void update_tracking(struct beauty_filter *f, gs_texture_t *src, uint32_t
 				for (uint32_t y = 0; y < sh; y++)
 					memcpy(f->snap + (size_t)y * sw * 4, ptr + (size_t)y * linesize, (size_t)sw * 4);
 				f->snap_id = cid;
+				f->snap_serial++;
 				pthread_mutex_unlock(&f->snap_mutex);
 			}
 			gs_stagesurface_unmap(f->stage[prev]);
@@ -1069,6 +1073,23 @@ bool beauty_filter_snapshot_mask(obs_source_t *filter, uint8_t **mask, uint32_t 
 	}
 	pthread_mutex_unlock(&f->snap_mutex);
 	return ok;
+}
+
+void beauty_filter_request_snapshot(obs_source_t *filter)
+{
+	if (!filter || strcmp(obs_source_get_id(filter), "obs_beauty_filter") != 0)
+		return;
+	struct beauty_filter *f = obs_obj_get_data(filter);
+	if (f)
+		f->snap_request = true;
+}
+
+uint32_t beauty_filter_snapshot_serial(obs_source_t *filter)
+{
+	if (!filter || strcmp(obs_source_get_id(filter), "obs_beauty_filter") != 0)
+		return 0;
+	struct beauty_filter *f = obs_obj_get_data(filter);
+	return f ? f->snap_serial : 0;
 }
 
 void beauty_filter_request_person_preview(obs_source_t *filter)

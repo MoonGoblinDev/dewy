@@ -9,8 +9,13 @@
 extern "C" {
 #endif
 
-/* Copy of the latest small camera frame (BGRA, caller bfree()s it) and the face landmarks
- * that belong to it. Returns false if no frame has been captured yet. */
+/* Ask for a snapshot: the filter copies the next frame it analyses (cheap, one frame). */
+void beauty_filter_request_snapshot(obs_source_t *filter);
+/* Changes every time a snapshot is taken. */
+uint32_t beauty_filter_snapshot_serial(obs_source_t *filter);
+
+/* Copy of the last snapshot (BGRA, caller bfree()s it) and the face landmarks that belong to
+ * it. Returns false if no snapshot has been taken yet. */
 bool beauty_filter_snapshot(obs_source_t *filter, uint8_t **bgra, uint32_t *w, uint32_t *h, ft_face *face);
 
 /* Latest person-segmentation mask (0..255, covers the whole frame; caller bfree()s it).

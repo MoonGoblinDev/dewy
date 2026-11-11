@@ -12,11 +12,10 @@ regular video filter, with no virtual camera. Skin smoothing, tone, face reshapi
 stickers, ambience, colour filters and virtual studio lighting, all controlled from one dock.
 
 <p align="center">
-  <img src="docs/media/demo.webp" alt="Dewy demo: a cursor works the real Dewy dock in OBS (skin sliders, reshaping, makeup looks, stickers, ambience, filters, lights, then one-click presets and saving a preset) while the right shows Dewy on top and the original camera below; then the full OBS window running Dewy live" width="960">
+  <video src="https://github.com/MoonGoblinDev/dewy/raw/main/docs/media/demo.mp4" controls width="720"></video>
 </p>
 <p align="center">The real Dewy dock in OBS: skin and reshape sliders, makeup, stickers, ambience, filters and light,
-then one-click presets and saving your own look. Dewy on top, the original camera below.<br>
-<a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 1080p, 80 s)</a></p>
+then one-click presets and saving your own look. Dewy on top, the original camera below.</p>
 
 ![OBS with the Dewy dock: a streamer in the preview with the Dewy look applied, and the dock's Presets tab](docs/media/obs-dewy.png)
 

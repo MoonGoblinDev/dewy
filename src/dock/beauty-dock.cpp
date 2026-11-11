@@ -351,7 +351,8 @@ public:
 private:
 	QStackedWidget *enhanceStack = nullptr;
 	std::vector<QScrollArea *> pageScrolls;
-	QTimer *thumbTimer = nullptr;
+	void renderThumbs(int page);
+	void waitForSnapshot(int page, uint32_t s0, int tries);
 	QWidget *sectionTitle(const QString &text, IconSpec icon, QLabel **detail = nullptr);
 	QWidget *sliderSection(const Opt &o);
 	QWidget *categorySection(const FeatureGroup &c);
@@ -540,13 +541,6 @@ BeautyDock::BeautyDock()
 	pageScrolls[PG_ATMO]->setWidget(buildAtmosphere());
 	pageScrolls[PG_FILTERS]->setWidget(buildFilters());
 	pageScrolls[PG_LIGHT]->setWidget(buildLight());
-	thumbTimer = new QTimer(this);
-	thumbTimer->setInterval(5000);
-	QObject::connect(thumbTimer, &QTimer::timeout, this, [this]() {
-		if (isVisible())
-			refreshThumbs();
-	});
-	thumbTimer->start();
 	cl->addWidget(pages);
 	root->addWidget(content, 1);
 
@@ -1463,8 +1457,16 @@ void BeautyDock::rebuildMyLooks()
 	myGrid->setVisible(!gi.empty());
 	for (auto it = locators.begin(); it != locators.end();)
 		it = it->first.rfind("mypreset:", 0) == 0 ? locators.erase(it) : std::next(it);
-	for (auto &it : gi)
-		locators["mypreset:" + it.name.toStdString()] = myGrid->tileNamed(it.name);
+	for (auto it = focusers.begin(); it != focusers.end();)
+		it = it->first.rfind("mypreset:", 0) == 0 ? focusers.erase(it) : std::next(it);
+	for (auto &it : gi) {
+		std::string id = "mypreset:" + it.name.toStdString();
+		locators[id] = myGrid->tileNamed(it.name);
+		focusers[id] = [this, n = it.name]() { /* scroll only */
+			showTab(PG_PRESETS);
+			reveal(PG_PRESETS, myGrid->tileNamed(n));
+		};
+	}
 	refreshMyThumbs();
 	refresh();
 }
@@ -1702,10 +1704,32 @@ void BeautyDock::refreshThumbs()
 		any |= j.page == page;
 	if (!any)
 		return;
-	if (page == PG_PRESETS)
-		refreshMyThumbs();
 	if (page == PG_LIGHT)
 		beauty_filter_request_person_preview(filter);
+	/* a fresh frame for this tab: ask the filter for one, render once it's there (or after
+	 * ~0.6 s with whatever is available, e.g. when the source isn't showing) */
+	uint32_t s0 = beauty_filter_snapshot_serial(filter);
+	beauty_filter_request_snapshot(filter);
+	waitForSnapshot(page, s0, 20);
+}
+
+void BeautyDock::waitForSnapshot(int page, uint32_t s0, int tries)
+{
+	if (!filter)
+		return;
+	if (beauty_filter_snapshot_serial(filter) != s0 || tries <= 0) {
+		renderThumbs(page);
+		return;
+	}
+	QTimer::singleShot(30, this, [this, page, s0, tries]() { waitForSnapshot(page, s0, tries - 1); });
+}
+
+void BeautyDock::renderThumbs(int page)
+{
+	if (!filter)
+		return;
+	if (page == PG_PRESETS)
+		refreshMyThumbs();
 	FaceCrop crop = captureFaceCrop(filter, 128, page == PG_LIGHT ? 3.4f : 2.1f); /* light: upper body */
 	for (auto &j : thumbJobs) {
 		if (j.page != page)
