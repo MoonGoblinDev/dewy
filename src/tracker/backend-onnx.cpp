@@ -111,7 +111,7 @@ public:
 			}
 			return true;
 		} catch (const Ort::Exception &e) {
-			log_msg("landmarks failed: %s", e.what());
+			ort_log("landmarks failed: %s", e.what());
 			have_prev = false;
 			return false;
 		}
