@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(dewy VERSION 0.3.0 LANGUAGES C CXX)
+project(dewy VERSION 0.1.0 LANGUAGES C CXX)
 if(APPLE)
   enable_language(OBJC OBJCXX)
 endif()
@@ -125,6 +125,12 @@ add_library(dewy MODULE
   src/dock/widgets.cpp
   src/dock/thumbs.cpp
 )
+if(APPLE)
+  target_sources(dewy PRIVATE src/dock/http-mac.mm)
+  set_source_files_properties(src/dock/http-mac.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+elseif(WIN32)
+  target_sources(dewy PRIVATE src/dock/http-win.cpp)
+endif()
 if(BEAUTY_TRACKER STREQUAL "vision")
   target_sources(dewy PRIVATE src/tracker/backend-vision.mm)
   target_compile_definitions(dewy PRIVATE BEAUTY_TRACKER_VISION)
@@ -187,7 +193,7 @@ elseif(WIN32)
   target_compile_definitions(dewy PRIVATE QT_NO_DEBUG)
   target_link_libraries(dewy PRIVATE
     "${IMPLIB_DIR}/obs.lib" "${IMPLIB_DIR}/obs-frontend-api.lib" "${IMPLIB_DIR}/w32-pthreads.lib"
-    "${QT_DIR}/lib/Qt6Widgets.lib" "${QT_DIR}/lib/Qt6Gui.lib" "${QT_DIR}/lib/Qt6Core.lib" dxgi.lib)
+    "${QT_DIR}/lib/Qt6Widgets.lib" "${QT_DIR}/lib/Qt6Gui.lib" "${QT_DIR}/lib/Qt6Core.lib" dxgi.lib winhttp.lib)
   set_target_properties(dewy PROPERTIES PREFIX "" MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 endif()
 
@@ -221,14 +227,15 @@ if(APPLE)
     DEPENDS dewy
     COMMENT "Installing dewy.plugin into ${OBS_USER_PLUGINS}")
 elseif(WIN32)
-  # Layout matches an OBS install: obs-plugins/64bit/*.dll + data/obs-plugins/dewy/*
+  # Release zip layout = OBS's per-machine plugin folder: dewy/bin/64bit/*.dll + dewy/data/*,
+  # unzipped into C:\ProgramData\obs-studio\plugins (no admin rights, survives OBS updates)
   target_compile_definitions(dewy PRIVATE BEAUTY_ORT_FILE="dewy-onnxruntime.dll")
-  install(TARGETS dewy LIBRARY DESTINATION obs-plugins/64bit RUNTIME DESTINATION obs-plugins/64bit)
-  install(FILES "${ORT_RUNTIME}" DESTINATION obs-plugins/64bit RENAME dewy-onnxruntime.dll)
-  install(FILES "${DML_DIR}/bin/x64-win/DirectML.dll" DESTINATION obs-plugins/64bit)
+  install(TARGETS dewy LIBRARY DESTINATION dewy/bin/64bit RUNTIME DESTINATION dewy/bin/64bit)
+  install(FILES "${ORT_RUNTIME}" DESTINATION dewy/bin/64bit RENAME dewy-onnxruntime.dll)
+  install(FILES "${DML_DIR}/bin/x64-win/DirectML.dll" DESTINATION dewy/bin/64bit)
   foreach(f IN LISTS PLUGIN_DATA)
     get_filename_component(dir "${f}" DIRECTORY)
-    install(FILES "data/${f}" DESTINATION "data/obs-plugins/dewy/${dir}")
+    install(FILES "data/${f}" DESTINATION "dewy/data/${dir}")
   endforeach()
   # Per-machine plugin folder that OBS 32+ loads; no admin rights needed and it survives OBS
   # updates (OBS must be closed, since it locks the DLLs):

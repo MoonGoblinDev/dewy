@@ -49,13 +49,23 @@ The details are in [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md).
 | **Light** | 9 whole-body virtual lights (key, rim, fill, background dim) that follow your real silhouette |
 
 - Every tab has its own on/off switch, and the dock's thumbnails are rendered from your own face.
+- When a new version is out, the dock shows a notice with a download button. Dewy checks GitHub's
+  public releases at most once a day and sends nothing else; turn it off under
+  **Enhance → Appearance → Advanced → Check for updates**.
 - Landmarks are tracked frame-synchronised, so makeup and stickers stay stuck to your face.
 - Skin edits use a learned segmenter (face skin, body skin, hair, clothes), so the neck and hands match
   the face, and walls, doors and shirts are never treated as skin.
 
 ## Install
 
-There are no prebuilt releases yet. Build from source (below), then restart OBS.
+Download the latest build from [Releases](https://github.com/MoonGoblinDev/dewy/releases):
+
+- **macOS (Apple Silicon):** run `dewy-<version>-macos-arm64.pkg`. It's signed and notarized by
+  Apple and installs into your user's OBS plugins folder.
+- **Windows (x64):** close OBS and unzip `dewy-<version>-windows-x64.zip` into
+  `C:\ProgramData\obs-studio\plugins\`. You get a `dewy` folder there; no admin rights needed.
+
+Then start OBS:
 
 1. The **Dewy** dock opens the first time (later: **Docks → Dewy**).
 2. Pick your camera in the dock and press **Add Dewy to this source**, or add the **Dewy** filter to
@@ -142,11 +152,8 @@ cmake --build build --config Release
 cpack --config build/CPackConfig.cmake -C Release -B dist
 ```
 
-Unzip `dist/dewy-<version>-windows-x64.zip` into your OBS folder (`C:\Program Files\obs-studio`) so
-that its `obs-plugins` and `data` folders merge. Without admin rights, and in a way that survives OBS
-updates, you can use OBS's per-machine plugin folder instead: copy the zip's `obs-plugins\64bit\*` to
-`C:\ProgramData\obs-studio\plugins\dewy\bin\64bit\` and `data\obs-plugins\dewy\*` to
-`C:\ProgramData\obs-studio\plugins\dewy\data\`. ONNX Runtime with DirectML ships renamed as
+Unzip `dist/dewy-<version>-windows-x64.zip` into `C:\ProgramData\obs-studio\plugins\`, OBS's
+per-machine plugin folder (no admin rights, survives OBS updates). ONNX Runtime with DirectML ships renamed as
 `dewy-onnxruntime.dll` and is loaded by full path, so it can't clash with another plugin's copy.
 
 To try the ONNX tracking backend on macOS: `cmake -S . -B build-onnx -DBEAUTY_TRACKER=onnx`.
@@ -175,6 +182,32 @@ python3 tools/obsctl.py shot "Video Capture Device" out.png 1280
 - To render every dock tab to PNG, create `plugin_config/dewy/snapshot/` in OBS's config folder
   (`~/Library/Application Support/obs-studio/` on macOS, `%APPDATA%\obs-studio\` on Windows) and
   restart OBS.
+
+### Releasing
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) and only run when a version
+tag is pushed:
+
+1. Set the version in `CMakeLists.txt` (`project(dewy VERSION 0.1.0 ...)`) and commit it.
+2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The tag must match the version.
+3. The workflow builds Windows and macOS. On macOS it signs the plugin and its bundled ONNX Runtime
+   (Developer ID, hardened runtime), builds a `.pkg`, has Apple notarize it and staples the ticket.
+   It then creates a **draft** release with both downloads and `SHA256SUMS.txt`; review it and press
+   **Publish**.
+
+The macOS job needs these repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | What it is |
+|---|---|
+| `MACOS_CERTIFICATE_P12_BASE64` | Your **Developer ID Application** certificate and private key, plus the **Developer ID Installer** one, exported together from Keychain Access as one `.p12`, base64-encoded |
+| `MACOS_CERTIFICATE_PASSWORD` | The password you set when exporting the `.p12` |
+| `MACOS_NOTARY_APPLE_ID` | The Apple ID email of your developer account |
+| `MACOS_NOTARY_TEAM_ID` | Your 10-character team ID |
+| `MACOS_NOTARY_PASSWORD` | An app-specific password for that Apple ID (appleid.apple.com → Sign-In and Security) |
+
+Without a Developer ID Installer certificate in the `.p12`, the macOS download is a signed,
+notarized `.zip` of the plugin instead of a `.pkg`. To test packaging locally without signing:
+`VERSION=0.1.0 UNSIGNED_PKG=1 tools/package-macos.sh`.
 
 ### Automating the dock
 

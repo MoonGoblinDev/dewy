@@ -1,0 +1,166 @@
+name: release
+
+# Runs only when a release tag is pushed:  git tag v0.1.0 && git push origin v0.1.0
+# The tag must match the version in CMakeLists.txt (project(dewy VERSION 0.1.0 ...)).
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write # create the GitHub Release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Check version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Tag must match CMakeLists.txt
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cmake_version=$(sed -nE 's/^project\(dewy VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
+          echo "tag $tag, CMakeLists.txt $cmake_version"
+          if [[ "$tag" != "$cmake_version" ]]; then
+            echo "::error::Tag v$tag does not match CMakeLists.txt version $cmake_version"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows x64
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .deps
+            data/models/*.onnx
+          key: deps-windows-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -C Release -B dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/dewy-${{ needs.version.outputs.version }}-windows-x64.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS arm64 (signed + notarized)
+    needs: version
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OBS (the plugin links against OBS.app)
+        run: brew install --cask obs
+      - uses: actions/cache@v4
+        with:
+          path: .deps
+          key: deps-macos-${{ hashFiles('CMakeLists.txt') }}
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64
+      - name: Build
+        run: cmake --build build
+
+      - name: Import signing certificates
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [[ -z "$CERT_P12_BASE64" || -z "$CERT_PASSWORD" ]]; then
+            echo "::error::Missing MACOS_CERTIFICATE_P12_BASE64 / MACOS_CERTIFICATE_PASSWORD secrets"
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/dewy-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/certs.p12"
+          security import "$RUNNER_TEMP/certs.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild -T /usr/bin/pkgbuild
+          rm -f "$RUNNER_TEMP/certs.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          app=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -nE 's/.*"(Developer ID Application: [^"]+)".*/\1/p' | head -1)
+          inst=$(security find-identity -v "$KEYCHAIN" | sed -nE 's/.*"(Developer ID Installer: [^"]+)".*/\1/p' | head -1)
+          if [[ -z "$app" ]]; then
+            echo "::error::No 'Developer ID Application' identity in the certificate"
+            exit 1
+          fi
+          echo "Application identity: $app"
+          echo "Installer identity: ${inst:-none (the macOS download will be a .zip instead of a .pkg)}"
+          {
+            echo "CODESIGN_IDENT=$app"
+            echo "INSTALLER_IDENT=$inst"
+            echo "SIGNING_KEYCHAIN=$KEYCHAIN"
+          } >> "$GITHUB_ENV"
+
+      - name: Sign, package, notarize
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          if [[ -z "$NOTARY_APPLE_ID" || -z "$NOTARY_TEAM_ID" || -z "$NOTARY_PASSWORD" ]]; then
+            echo "::error::Missing MACOS_NOTARY_APPLE_ID / MACOS_NOTARY_TEAM_ID / MACOS_NOTARY_PASSWORD secrets"
+            exit 1
+          fi
+          tools/package-macos.sh
+
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          [[ -n "${SIGNING_KEYCHAIN:-}" ]] && security delete-keychain "$SIGNING_KEYCHAIN" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/dewy-${{ needs.version.outputs.version }}-macos-arm64.pkg
+            dist/dewy-${{ needs.version.outputs.version }}-macos-arm64.zip
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Checksums
+        run: cd assets && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cat > notes.md <<EOF
+          ## Install
+
+          **macOS (Apple Silicon, OBS 33+):** run \`dewy-$VERSION-macos-arm64.pkg\` and restart OBS.
+          The installer is signed and notarized by Apple; it installs into your user's OBS plugins folder.
+
+          **Windows (x64, OBS 33+):** close OBS, unzip \`dewy-$VERSION-windows-x64.zip\` into
+          \`C:\ProgramData\obs-studio\plugins\` (you get a \`dewy\` folder there) and start OBS.
+
+          Then open **Docks → Dewy**, pick your camera and press **Add Dewy to this source**.
+          EOF
+          gh release create "$GITHUB_REF_NAME" assets/* \
+            --repo "$GITHUB_REPOSITORY" --draft --title "Dewy $VERSION" \
+            --notes-file notes.md --generate-notes

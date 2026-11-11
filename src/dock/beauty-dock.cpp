@@ -25,6 +25,9 @@
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QScrollBar>
 #include <QtCore/QVariantAnimation>
+#include <QtCore/QDateTime>
+#include <QtCore/QUrl>
+#include <QtGui/QDesktopServices>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollArea>
@@ -37,6 +40,7 @@
 #include <vector>
 
 #include "widgets.hpp"
+#include "http.hpp"
 #include "thumbs.hpp"
 #include "beauty-api.h"
 #include "presets.h"
@@ -256,6 +260,12 @@ private:
 	std::map<std::string, std::function<void()>> focusers;
 	std::map<std::string, QPointer<QWidget>> locators; /* automation: where a control is on screen */
 	QPushButton *resetBtn = nullptr, *saveBtn = nullptr;
+	/* update notice */
+	QFrame *updateBanner = nullptr;
+	QLabel *updateLabel = nullptr;
+	QString updateVersion, updateUrl;
+	void checkForUpdates();
+	void showUpdateIfNewer();
 	/* presets */
 	obs_data_array_t *myLooks = nullptr;
 	PresetGrid *myGrid = nullptr;
@@ -522,6 +532,7 @@ BeautyDock::BeautyDock()
 	root->setContentsMargins(0, 0, 0, 0);
 	root->setSpacing(0);
 	root->addWidget(buildHeader());
+	QTimer::singleShot(6000, this, [this]() { checkForUpdates(); });
 
 	content = new QWidget(this);
 	auto *cl = new QVBoxLayout(content);
@@ -610,6 +621,108 @@ BeautyDock::~BeautyDock()
 	obs_data_array_release(myLooks);
 }
 
+/* ---------------- update notice ---------------- */
+
+/* plugin_config/dewy/update.json: {enabled, last_check, latest, url, dismissed} */
+static obs_data_t *loadUpdateConfig()
+{
+	char *path = obs_module_config_path("update.json");
+	obs_data_t *d = path ? obs_data_create_from_json_file(path) : nullptr;
+	bfree(path);
+	if (!d)
+		d = obs_data_create();
+	obs_data_set_default_bool(d, "enabled", true);
+	return d;
+}
+
+static void saveUpdateConfig(obs_data_t *d)
+{
+	char *dir = obs_module_config_path("");
+	if (dir) {
+		os_mkdirs(dir);
+		bfree(dir);
+	}
+	char *path = obs_module_config_path("update.json");
+	if (path)
+		obs_data_save_json_safe(d, path, "tmp", "bak");
+	bfree(path);
+}
+
+/* "v0.10.2" > "0.9" etc. */
+static bool versionNewer(const QString &a, const QString &b)
+{
+	auto parts = [](QString s) {
+		if (s.startsWith('v') || s.startsWith('V'))
+			s.remove(0, 1);
+		std::vector<int> v;
+		for (const QString &p : s.split('.'))
+			v.push_back(p.toInt());
+		while (v.size() < 3)
+			v.push_back(0);
+		return v;
+	};
+	return parts(a) > parts(b);
+}
+
+void BeautyDock::showUpdateIfNewer()
+{
+	obs_data_t *c = loadUpdateConfig();
+	QString latest = QString::fromUtf8(obs_data_get_string(c, "latest"));
+	QString dismissed = QString::fromUtf8(obs_data_get_string(c, "dismissed"));
+	bool on = obs_data_get_bool(c, "enabled");
+	updateUrl = QString::fromUtf8(obs_data_get_string(c, "url"));
+	obs_data_release(c);
+	updateVersion = latest.startsWith('v') ? latest.mid(1) : latest;
+	bool show = on && !latest.isEmpty() && versionNewer(latest, QStringLiteral(PLUGIN_VERSION)) &&
+		    latest != dismissed && !updateUrl.isEmpty();
+	if (show)
+		updateLabel->setText(QStringLiteral("Dewy %1 is available").arg(updateVersion));
+	updateBanner->setVisible(show);
+}
+
+/* Once a day, ask GitHub which release is the latest: github.com/<repo>/releases/latest redirects to
+ * .../releases/tag/vX.Y.Z (published releases only; drafts never count). One anonymous HEAD request
+ * through the OS's HTTPS client; nothing about the user is sent, and unlike the REST API it isn't
+ * rate limited per IP. DEWY_UPDATE_URL overrides the address (testing). */
+void BeautyDock::checkForUpdates()
+{
+	showUpdateIfNewer(); /* what we already know */
+	obs_data_t *c = loadUpdateConfig();
+	bool on = obs_data_get_bool(c, "enabled");
+	long long last = obs_data_get_int(c, "last_check");
+	obs_data_release(c);
+	long long now = QDateTime::currentSecsSinceEpoch();
+	const char *override = getenv("DEWY_UPDATE_URL");
+	if (!on || (!override && now - last < 24 * 3600))
+		return;
+	std::string url = override ? override : "https://github.com/MoonGoblinDev/dewy/releases/latest";
+	QPointer<BeautyDock> self(this);
+	httpResolve(url, "Dewy/" PLUGIN_VERSION, [self, now](int status, std::string finalUrl) {
+		QMetaObject::invokeMethod(qApp, [self, now, status, finalUrl]() {
+			if (!self)
+				return;
+			if (status == 0) { /* offline: try again next time OBS starts */
+				blog(LOG_INFO, "[dewy] update check: no connection");
+				return;
+			}
+			obs_data_t *c = loadUpdateConfig();
+			obs_data_set_int(c, "last_check", now);
+			QString u = QString::fromStdString(finalUrl);
+			int at = u.indexOf(QStringLiteral("/releases/tag/"));
+			if (status == 200 && at >= 0) {
+				QString tag = u.mid(at + 14).section('/', 0, 0).section('?', 0, 0);
+				obs_data_set_string(c, "latest", tag.toUtf8().constData());
+				obs_data_set_string(c, "url", finalUrl.c_str());
+				blog(LOG_INFO, "[dewy] latest release: %s (this is %s)", tag.toUtf8().constData(),
+				     PLUGIN_VERSION);
+			}
+			saveUpdateConfig(c);
+			obs_data_release(c);
+			self->showUpdateIfNewer();
+		}, Qt::QueuedConnection);
+	});
+}
+
 QWidget *BeautyDock::buildHeader()
 {
 	auto *w = new QWidget(this);
@@ -661,6 +774,41 @@ QWidget *BeautyDock::buildHeader()
 	locators["reset"] = resetBtn;
 	row->addWidget(resetBtn);
 
+	/* "Dewy x.y.z is available" (hidden until an update check finds one) */
+	updateBanner = new QFrame(w);
+	updateBanner->setObjectName("UpdateBanner");
+	updateBanner->setStyleSheet("#UpdateBanner { background:#2a1d24; border:1px solid #5a3446; border-radius:10px; }");
+	{
+		auto *ul = new QHBoxLayout(updateBanner);
+		ul->setContentsMargins(12, 7, 6, 7);
+		ul->setSpacing(8);
+		updateLabel = new QLabel(updateBanner);
+		updateLabel->setStyleSheet("color:#ffd0df; font-size:12px; font-weight:600;");
+		ul->addWidget(updateLabel, 1);
+		auto *dl = new QPushButton(QStringLiteral("Download"), updateBanner);
+		dl->setCursor(Qt::PointingHandCursor);
+		dl->setStyleSheet("QPushButton { color:#1e0e16; background:#ff96b8; border:none; border-radius:11px;"
+				  " padding:3px 11px; font-size:12px; font-weight:700; }"
+				  "QPushButton:hover { background:#ffaac6; }");
+		QObject::connect(dl, &QPushButton::clicked, this,
+				 [this]() { QDesktopServices::openUrl(QUrl(updateUrl)); });
+		ul->addWidget(dl);
+		auto *x = new QPushButton(QStringLiteral("✕"), updateBanner);
+		x->setCursor(Qt::PointingHandCursor);
+		x->setToolTip(QStringLiteral("Don't remind me about this version"));
+		x->setStyleSheet("QPushButton { color:#c9a3b3; background:transparent; border:none; font-size:13px;"
+				 " padding:2px 6px; } QPushButton:hover { color:#ffffff; }");
+		QObject::connect(x, &QPushButton::clicked, this, [this]() {
+			obs_data_t *c = loadUpdateConfig();
+			obs_data_set_string(c, "dismissed", updateVersion.toUtf8().constData());
+			saveUpdateConfig(c);
+			obs_data_release(c);
+			updateBanner->hide();
+		});
+		ul->addWidget(x);
+	}
+	updateBanner->hide();
+
 	enableToggle = new Toggle(w);
 	enableToggle->setToolTip(QStringLiteral("Turn this tab on / off"));
 	enableToggle->onToggled = [this](bool on) {
@@ -670,6 +818,7 @@ QWidget *BeautyDock::buildHeader()
 	};
 	row->addWidget(enableToggle);
 	v->addLayout(row);
+	v->addWidget(updateBanner);
 
 	sourceBox = new QComboBox(w);
 	sourceBox->setToolTip(QStringLiteral("Camera / source to beautify"));
@@ -866,6 +1015,24 @@ QWidget *BeautyDock::buildAppearance()
 		refreshers.push_back([this, cb, key]() {
 			QSignalBlocker block(cb);
 			cb->setChecked(getBool(key));
+		});
+		al->addWidget(cb);
+	}
+	{
+		auto *cb = new QCheckBox(QStringLiteral("Check for updates (once a day)"), adv);
+		cb->setToolTip(QStringLiteral("Asks GitHub for the latest Dewy release. Nothing else is sent."));
+		obs_data_t *c = loadUpdateConfig();
+		cb->setChecked(obs_data_get_bool(c, "enabled"));
+		obs_data_release(c);
+		QObject::connect(cb, &QCheckBox::toggled, this, [this](bool on) {
+			obs_data_t *c = loadUpdateConfig();
+			obs_data_set_bool(c, "enabled", on);
+			saveUpdateConfig(c);
+			obs_data_release(c);
+			if (on)
+				checkForUpdates();
+			else if (updateBanner)
+				updateBanner->hide();
 		});
 		al->addWidget(cb);
 	}
