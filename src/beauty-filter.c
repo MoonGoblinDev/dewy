@@ -27,6 +27,12 @@
 #include <util/threading.h>
 
 #define TRACK_SHORT_SIDE 360.0f
+/* Captured frames kept for sync mode: the frame shown is up to RING_N - 1 frames old. */
+#define RING_N 4
+/* A tracker faster than this (Apple Vision, ~1 ms) is waited for briefly; slower ones
+ * (ONNX landmarks, 10-20 ms) are pipelined: the video is delayed by as many frames as the
+ * tracker needs, and the render thread never blocks. */
+#define SYNC_WAIT_MAX_MS 3.0f
 
 struct beauty_filter {
 	obs_source_t *source;
@@ -34,7 +40,7 @@ struct beauty_filter {
 	gs_effect_t *blur_effect;
 	gs_effect_t *final_effect;
 
-	gs_texrender_t *tr_ring[2], *tr_small, *tr_half, *tr_tmp, *tr_smooth, *tr_q, *tr_e, *tr_tmp_e, *tr_tone, *tr_out;
+	gs_texrender_t *tr_ring[RING_N], *tr_small, *tr_half, *tr_tmp, *tr_smooth, *tr_q, *tr_e, *tr_tmp_e, *tr_tone, *tr_out;
 	gs_stagesurf_t *stage[2];
 	bool staged[2];
 	int stage_idx;
@@ -52,10 +58,13 @@ struct beauty_filter {
 	uint64_t last_ns;
 	bool processed; /* output already rendered this frame */
 	uint64_t frame;          /* render frame counter (tags tracker results) */
-	uint64_t ring_id[2];     /* frame held in tr_ring[i] */
-	uint32_t ring_w[2], ring_h[2];
+	uint64_t ring_id[RING_N]; /* frame held in tr_ring[i] */
+	uint32_t ring_w[RING_N], ring_h[RING_N];
 	uint64_t stage_id[2];    /* frame staged in stage[i] */
 	bool sync_tracking;
+	int sync_delay;          /* frames the shown frame lags the captured one (sync mode) */
+	uint64_t sync_lower_ns;  /* since when a smaller delay would have sufficed */
+	bool sync_wait;          /* fast tracker: wait for its result instead of pipelining */
 
 	/* settings (0..1 or -1..1) */
 	float smooth, foundation, skin_tone, redness, pouch, fold, teeth, eyelight, clarity;
@@ -227,9 +236,6 @@ static void *beauty_create(obs_data_t *settings, obs_source_t *source)
 {
 	struct beauty_filter *f = bzalloc(sizeof(*f));
 	f->source = source;
-	char *models = obs_module_file("models");
-	f->tracker = face_tracker_create(models);
-	bfree(models);
 	f->fx = fx_layers_create();
 	f->start_ns = os_gettime_ns();
 	pthread_mutex_init(&f->snap_mutex, NULL);
@@ -237,8 +243,10 @@ static void *beauty_create(obs_data_t *settings, obs_source_t *source)
 	obs_enter_graphics();
 	f->blur_effect = load_effect("effects/beauty-blur.effect");
 	f->final_effect = load_effect("effects/beauty-final.effect");
-	gs_texrender_t **trs[] = {&f->tr_ring[0], &f->tr_ring[1], &f->tr_half, &f->tr_tmp, &f->tr_smooth, &f->tr_q,
-				  &f->tr_e,   &f->tr_tmp_e, &f->tr_tone, &f->tr_out};
+	for (int i = 0; i < RING_N; i++)
+		f->tr_ring[i] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	gs_texrender_t **trs[] = {&f->tr_half, &f->tr_tmp,   &f->tr_smooth, &f->tr_q,
+				  &f->tr_e,    &f->tr_tmp_e, &f->tr_tone,   &f->tr_out};
 	for (size_t i = 0; i < sizeof(trs) / sizeof(trs[0]); i++)
 		*trs[i] = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->tr_small = gs_texrender_create(GS_BGRA, GS_ZS_NONE);
@@ -253,7 +261,12 @@ static void *beauty_create(obs_data_t *settings, obs_source_t *source)
 	f->tr_tone_pb = gs_texrender_create(GS_RGBA16F, GS_ZS_NONE);
 	f->tr_pm2 = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	f->data_tex = gs_texture_create(DATA_TEX_WIDTH, 1, GS_RGBA32F, 1, NULL, GS_DYNAMIC);
+	face_tracker_set_render_device(gs_get_device_type() == GS_DEVICE_DIRECT3D_11 ? gs_get_device_obj() : NULL);
 	obs_leave_graphics();
+
+	char *models = obs_module_file("models");
+	f->tracker = face_tracker_create(models); /* returns at once; models load in the background */
+	bfree(models);
 
 	beauty_update(f, settings);
 	return f;
@@ -265,8 +278,10 @@ static void beauty_destroy(void *data)
 	obs_enter_graphics();
 	gs_effect_destroy(f->blur_effect);
 	gs_effect_destroy(f->final_effect);
-	gs_texrender_t *trs[] = {f->tr_ring[0], f->tr_ring[1], f->tr_small, f->tr_half, f->tr_tmp,     f->tr_smooth,
-				 f->tr_q,   f->tr_e,     f->tr_tmp_e, f->tr_tone, f->tr_out};
+	for (int i = 0; i < RING_N; i++)
+		gs_texrender_destroy(f->tr_ring[i]);
+	gs_texrender_t *trs[] = {f->tr_small, f->tr_half,   f->tr_tmp,  f->tr_smooth, f->tr_q,
+				 f->tr_e,     f->tr_tmp_e,  f->tr_tone, f->tr_out};
 	for (size_t i = 0; i < sizeof(trs) / sizeof(trs[0]); i++)
 		gs_texrender_destroy(trs[i]);
 	gs_stagesurface_destroy(f->stage[0]);
@@ -350,10 +365,11 @@ static obs_properties_t *beauty_properties(void *data)
 	obs_properties_t *adv = obs_properties_create();
 	obs_properties_add_bool(adv, "all_skin", obs_module_text("Smooth all visible skin (not just the face)"));
 	obs_property_t *sync = obs_properties_add_bool(
-		adv, "sync_tracking", obs_module_text("Lock effects to the face (delays video by 1 frame)"));
+		adv, "sync_tracking", obs_module_text("Lock effects to the face (delays video by 1-3 frames)"));
 	obs_property_set_long_description(
 		sync, obs_module_text("Shows each frame together with its own face landmarks, so makeup and reshaping "
-				      "never trail behind head movement. Adds one frame of video latency."));
+				      "never trail behind head movement. Adds 1-3 frames of video latency, depending on how fast "
+				      "face tracking runs on this machine."));
 	obs_properties_add_bool(adv, "show_landmarks", obs_module_text("Show face landmarks"));
 	obs_property_t *dv = obs_properties_add_list(adv, "debug_view", obs_module_text("Debug view"),
 						     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
@@ -537,7 +553,7 @@ static void update_tracking(struct beauty_filter *f, gs_texture_t *src, uint32_t
 			gs_stagesurface_unmap(f->stage[prev]);
 		}
 		f->staged[prev] = false;
-		if (sent && f->sync_tracking)
+		if (sent && f->sync_tracking && f->sync_wait)
 			face_tracker_wait(f->tracker, cid, 4.0f);
 	}
 
@@ -945,6 +961,36 @@ static void draw_landmarks(struct beauty_filter *f, uint32_t w, uint32_t h)
 	}
 }
 
+/* Frame delay for sync mode. Frame N is read back and handed to the tracker while frame N+1
+ * renders, so its landmarks are ready (d - 1) frame intervals later; pick the smallest d that
+ * covers the tracker's mean time plus a margin. Grows at once, shrinks only after it has been
+ * too large for 2 s, so the video doesn't stutter as the timing wobbles. */
+static void update_sync_delay(struct beauty_filter *f)
+{
+	float ms = 0, det = 0;
+	face_tracker_stats(f->tracker, &ms, &det);
+	f->sync_wait = ms > 0.0f && ms <= SYNC_WAIT_MAX_MS;
+	int need = 1;
+	if (!f->sync_wait && ms > 0.0f) {
+		double interval_ms = (double)video_output_get_frame_time(obs_get_video()) / 1e6;
+		if (interval_ms <= 0.0)
+			interval_ms = 1000.0 / 30.0;
+		need = 1 + (int)ceil((ms * 1.2 + 2.0) / interval_ms);
+		if (need > RING_N - 1)
+			need = RING_N - 1;
+	}
+	uint64_t now = os_gettime_ns();
+	if (need >= f->sync_delay) {
+		f->sync_delay = need;
+		f->sync_lower_ns = 0;
+	} else if (!f->sync_lower_ns) {
+		f->sync_lower_ns = now;
+	} else if (now - f->sync_lower_ns > 2000000000ULL) {
+		f->sync_delay = need;
+		f->sync_lower_ns = 0;
+	}
+}
+
 static void beauty_render(void *data, gs_effect_t *unused)
 {
 	struct beauty_filter *f = data;
@@ -961,7 +1007,8 @@ static void beauty_render(void *data, gs_effect_t *unused)
 
 	if (!f->processed) {
 		uint64_t id = ++f->frame;
-		int slot = (int)(id & 1);
+		int slot = (int)(id % RING_N);
+		update_sync_delay(f);
 		if (!capture_source(f, f->tr_ring[slot], target, parent, w, h)) {
 			obs_source_skip_video_filter(f->source);
 			return;
@@ -976,13 +1023,17 @@ static void beauty_render(void *data, gs_effect_t *unused)
 		gs_enable_blending(false);
 		update_tracking(f, src, w, h, id);
 
-		/* Sync mode shows the previous frame, whose landmarks are now known. */
-		int other = slot ^ 1;
+		/* Sync mode shows an older frame whose landmarks are known by now (see
+		 * update_sync_delay); falls back to newer frames right after a start or resize. */
 		gs_texture_t *show = src;
 		uint64_t show_id = id;
-		if (f->sync_tracking && f->ring_id[other] == id - 1 && f->ring_w[other] == w && f->ring_h[other] == h) {
-			show = gs_texrender_get_texture(f->tr_ring[other]);
-			show_id = id - 1;
+		for (int d = f->sync_tracking ? f->sync_delay : 0; d > 0; d--) {
+			int s = (int)((id - d) % RING_N);
+			if (id > (uint64_t)d && f->ring_id[s] == id - d && f->ring_w[s] == w && f->ring_h[s] == h) {
+				show = gs_texrender_get_texture(f->tr_ring[s]);
+				show_id = id - d;
+				break;
+			}
 		}
 		process_frame(f, show, w, h, show_id);
 		gs_blend_state_pop();
@@ -991,9 +1042,11 @@ static void beauty_render(void *data, gs_effect_t *unused)
 		if (id % 1800 == 0) {
 			float ms, det;
 			face_tracker_stats(f->tracker, &ms, &det);
-			blog(LOG_INFO, "[dewy] %s: %.2f ms/frame, %.0f%% full detections, face %s, %.0f%% new frames",
+			blog(LOG_INFO,
+			     "[dewy] %s: %.2f ms/frame, %.0f%% full detections, face %s, %.0f%% new frames, sync delay %d",
 			     face_tracker_backend_name(f->tracker), ms, det * 100.0f, f->face.present ? "present" : "absent",
-			     (double)(f->content_last - f->log_content) * 100.0 / 1800.0);
+			     (double)(f->content_last - f->log_content) * 100.0 / 1800.0,
+			     f->sync_tracking ? f->sync_delay : 0);
 			f->log_content = f->content_last;
 		}
 	}

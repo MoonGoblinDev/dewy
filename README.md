@@ -61,8 +61,9 @@ There are no prebuilt releases yet. Build from source (below), then restart OBS.
 2. Pick your camera in the dock and press **Add Dewy to this source**, or add the **Dewy** filter to
    any video source from its Filters window.
 
-**Requirements:** OBS Studio 33 and macOS on Apple Silicon (tested). The Windows build compiles
-in CI but **hasn't been run on a Windows PC yet**, so expect fixes to be needed.
+**Requirements:** OBS Studio 33 on macOS (Apple Silicon) or Windows 10/11 x64 with a DirectX 12 GPU.
+Windows was first tested on a real PC in November 2026 (see [docs/windows-plan.md](docs/windows-plan.md)
+for the known issues and the fix plan).
 
 ## Performance
 
@@ -78,6 +79,28 @@ of the filter barely depends on which features are on:
 
 Face tracking runs on Apple Vision, and segmentation runs mostly on the Neural Engine (Core ML via
 ONNX Runtime), so little of the work competes with a game for the GPU.
+
+### Windows
+
+Measured on a laptop with an Intel i5-9300H, a GeForce GTX 1050 Ti (OBS renders on it; an Intel UHD 630
+is also present), OBS 33.0.1, 1080p canvas, with a 640×360 24 fps talking-head video as the source.
+Landmarks and segmentation run on DirectML, on the same GPU as OBS.
+
+| | Filter off | Dewy on (default) | Dewy on, every tab active |
+|---|---|---|---|
+| OBS render time per frame, 30 fps canvas | 1.0–1.3 ms | 1.6–2.2 ms | 1.6 ms |
+| OBS render time per frame, 60 fps canvas | 0.9 ms | 2.2 ms | |
+| OBS CPU (share of one core) | 2 % | 22–24 % | 21 % |
+| GPU utilisation | 9 % | 33 % | 33 % |
+| Skipped frames | 0 | 0 | 0 |
+| Face tracking per frame (worker thread) | n/a | 17–20 ms | 17–20 ms |
+| Adding the filter | | 53 ms (was 1.3 s) | |
+
+*Lock effects to the face* adapts to the tracker's speed. Here that means a 2-frame video delay at 30 fps
+and 3 frames at 60 fps, and the render thread never waits. Before the Windows fixes, the same machine
+spent 5.4 ms per frame with the filter on, ran all inference on the Intel iGPU, and froze OBS for
+1.3 s when the filter was added. The details are in [docs/windows-plan.md](docs/windows-plan.md).
+CPU inference (`DEWY_ORT_CPU=1`) was no faster than DirectML and used 4–7× the CPU.
 
 ## How it works
 
@@ -108,9 +131,10 @@ The first configure downloads the OBS 33.0.0 headers, SIMDe, OBS's Qt 6.11 heade
 and the models into `.deps/` and `data/models/`. The plugin links against the frameworks inside
 OBS.app.
 
-### Windows x64 (builds in CI, not yet tested on a PC)
+### Windows x64
 
-Needs Visual Studio 2022+ with the C++ workload, and CMake 3.24+.
+Needs Visual Studio 2022+ (or its Build Tools) with the C++ workload, and CMake 3.24+. The CMake that
+ships with Visual Studio works.
 
 ```bat
 cmake -S . -B build -A x64
@@ -119,10 +143,21 @@ cpack --config build/CPackConfig.cmake -C Release -B dist
 ```
 
 Unzip `dist/dewy-<version>-windows-x64.zip` into your OBS folder (`C:\Program Files\obs-studio`) so
-that its `obs-plugins` and `data` folders merge. ONNX Runtime with DirectML ships renamed as
+that its `obs-plugins` and `data` folders merge. Without admin rights, and in a way that survives OBS
+updates, you can use OBS's per-machine plugin folder instead: copy the zip's `obs-plugins\64bit\*` to
+`C:\ProgramData\obs-studio\plugins\dewy\bin\64bit\` and `data\obs-plugins\dewy\*` to
+`C:\ProgramData\obs-studio\plugins\dewy\data\`. ONNX Runtime with DirectML ships renamed as
 `dewy-onnxruntime.dll` and is loaded by full path, so it can't clash with another plugin's copy.
 
 To try the ONNX tracking backend on macOS: `cmake -S . -B build-onnx -DBEAUTY_TRACKER=onnx`.
+
+For development on Windows, close OBS and run
+`cmake --build build --config Release --target install-plugin`. It installs into
+`C:\ProgramData\obs-studio\plugins\dewy`, which needs no admin rights.
+
+Environment variables for diagnosing inference (set them before starting OBS):
+`DEWY_PROFILE=1` logs the landmark pass's preprocessing and `Run` times, `DEWY_ORT_CPU=1` forces CPU
+inference, and `DEWY_DML_ADAPTER=<n>` overrides the DirectML adapter, which otherwise matches OBS's own.
 
 ## Development
 
@@ -137,8 +172,9 @@ python3 tools/obsctl.py shot "Video Capture Device" out.png 1280
 - Shader edits only need `install-plugin` followed by `reload`, because effects are compiled from
   source and bypass libobs's effect cache.
 - C, Objective-C and preset JSON changes need an OBS restart.
-- To render every dock tab to PNG, create
-  `~/Library/Application Support/obs-studio/plugin_config/dewy/snapshot/` and restart OBS.
+- To render every dock tab to PNG, create `plugin_config/dewy/snapshot/` in OBS's config folder
+  (`~/Library/Application Support/obs-studio/` on macOS, `%APPDATA%\obs-studio\` on Windows) and
+  restart OBS.
 
 ### Automating the dock
 
@@ -193,7 +229,8 @@ tests/                     tracking jitter / lag harnesses (need updating for th
 ## Roadmap
 
 - Prebuilt releases for macOS
-- Test the Windows build on real hardware
+- Windows: test on more GPUs (RTX, Radeon, iGPU-only), and an FP16 landmark model for GPUs with fast
+  FP16 ([plan](docs/windows-plan.md))
 - Validate the pigment model across a wide range of skin tones
 - Multiple faces, Linux
 

@@ -52,6 +52,9 @@ const char *face_tracker_backend_name(face_tracker_t *ft);
 
 /* ONNX backend: full path of the ONNX Runtime library to load (set once at module load). */
 void face_tracker_set_runtime_library(const char *path);
+/* Windows: OBS's ID3D11Device (gs_get_device_obj), so inference runs on the same GPU as OBS.
+ * Call from the graphics thread before the first face_tracker_create. No-op elsewhere. */
+void face_tracker_set_render_device(void *device);
 void face_tracker_destroy(face_tracker_t *ft);
 
 /* True while a previous frame is still being analysed. */

@@ -18,7 +18,12 @@ import asyncio, base64, hashlib, json, os, sys, uuid
 
 import websockets
 
-CONFIG = os.path.expanduser("~/Library/Application Support/obs-studio/plugin_config/obs-websocket/config.json")
+if sys.platform == "win32":
+    CONFIG = os.path.join(os.environ["APPDATA"], "obs-studio", "plugin_config", "obs-websocket", "config.json")
+elif sys.platform == "darwin":
+    CONFIG = os.path.expanduser("~/Library/Application Support/obs-studio/plugin_config/obs-websocket/config.json")
+else:
+    CONFIG = os.path.expanduser("~/.config/obs-studio/plugin_config/obs-websocket/config.json")
 FILTER_KIND = "obs_beauty_filter"
 
 

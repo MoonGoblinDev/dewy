@@ -187,7 +187,7 @@ elseif(WIN32)
   target_compile_definitions(dewy PRIVATE QT_NO_DEBUG)
   target_link_libraries(dewy PRIVATE
     "${IMPLIB_DIR}/obs.lib" "${IMPLIB_DIR}/obs-frontend-api.lib" "${IMPLIB_DIR}/w32-pthreads.lib"
-    "${QT_DIR}/lib/Qt6Widgets.lib" "${QT_DIR}/lib/Qt6Gui.lib" "${QT_DIR}/lib/Qt6Core.lib")
+    "${QT_DIR}/lib/Qt6Widgets.lib" "${QT_DIR}/lib/Qt6Gui.lib" "${QT_DIR}/lib/Qt6Core.lib" dxgi.lib)
   set_target_properties(dewy PROPERTIES PREFIX "" MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 endif()
 
@@ -230,6 +230,19 @@ elseif(WIN32)
     get_filename_component(dir "${f}" DIRECTORY)
     install(FILES "data/${f}" DESTINATION "data/obs-plugins/dewy/${dir}")
   endforeach()
+  # Per-machine plugin folder that OBS 32+ loads; no admin rights needed and it survives OBS
+  # updates (OBS must be closed, since it locks the DLLs):
+  #   cmake --build build --config Release --target install-plugin
+  set(OBS_MACHINE_PLUGIN "$ENV{ProgramData}/obs-studio/plugins/dewy")
+  file(TO_CMAKE_PATH "${OBS_MACHINE_PLUGIN}" OBS_MACHINE_PLUGIN)
+  add_custom_target(install-plugin
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${OBS_MACHINE_PLUGIN}/bin/64bit"
+    COMMAND "${CMAKE_COMMAND}" -E copy "$<TARGET_FILE:dewy>" "${OBS_MACHINE_PLUGIN}/bin/64bit/"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${ORT_RUNTIME}" "${OBS_MACHINE_PLUGIN}/bin/64bit/dewy-onnxruntime.dll"
+    COMMAND "${CMAKE_COMMAND}" -E copy "${DML_DIR}/bin/x64-win/DirectML.dll" "${OBS_MACHINE_PLUGIN}/bin/64bit/"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${CMAKE_SOURCE_DIR}/data" "${OBS_MACHINE_PLUGIN}/data"
+    DEPENDS dewy
+    COMMENT "Installing Dewy into ${OBS_MACHINE_PLUGIN}")
   set(CPACK_GENERATOR ZIP)
   set(CPACK_PACKAGE_FILE_NAME "dewy-${PROJECT_VERSION}-windows-x64")
   set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)

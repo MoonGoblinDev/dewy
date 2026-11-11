@@ -858,7 +858,7 @@ QWidget *BeautyDock::buildAppearance()
 	struct B {
 		const char *key, *text;
 	};
-	for (B b : {B{"all_skin", "Smooth all visible skin"}, B{"sync_tracking", "Lock effects to the face (+1 frame)"},
+	for (B b : {B{"all_skin", "Smooth all visible skin"}, B{"sync_tracking", "Lock effects to the face (+1-3 frames)"},
 		    B{"show_landmarks", "Show face landmarks"}}) {
 		auto *cb = new QCheckBox(QString::fromUtf8(b.text), adv);
 		const char *key = b.key;

@@ -12,7 +12,9 @@
 // DirectML execution provider (any DX12 GPU), with CPU as fallback.
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -68,12 +70,12 @@ public:
 			lmk = ort_model(dir + "/face_landmarks_478.onnx", true);
 			ready = det && lmk;
 			ort_log(ready ? "face landmarks: MediaPipe Face Landmarker v2 (%s)" : "face models failed to load",
-				lmk.accelerated ? "GPU" : "CPU");
+				lmk && lmk->accelerated ? ort_accel_name() : "CPU");
 		} catch (const Ort::Exception &e) {
 			ort_log("ONNX Runtime error: %s", e.what());
 		}
 	}
-	const char *name() const override { return lmk.accelerated ? "MediaPipe (GPU)" : "MediaPipe (CPU)"; }
+	const char *name() const override { return lmk && lmk->accelerated ? "MediaPipe (GPU)" : "MediaPipe (CPU)"; }
 
 	bool detect(const uint8_t *bgra, int w, int h, int stride, ft_face &f, bool &full) override
 	{
@@ -140,10 +142,10 @@ private:
 		Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 		int64_t shape[4] = {1, 3, S, S};
 		Ort::Value t = Ort::Value::CreateTensor<float>(mem, in.data(), in.size(), shape, 4);
-		auto out = det.session.Run(Ort::RunOptions{nullptr}, det.in.data(), &t, 1, det.out.data(), det.out.size());
+		auto out = det->run(t);
 		auto find = [&](const std::string &n) -> const float * {
-			for (size_t i = 0; i < det.out_names.size(); i++)
-				if (det.out_names[i] == n)
+			for (size_t i = 0; i < det->out_names.size(); i++)
+				if (det->out_names[i] == n)
 					return out[i].GetTensorData<float>();
 			return nullptr;
 		};
@@ -195,6 +197,7 @@ private:
 		const int S = 256;
 		float cs = std::cos(c.roll), sn = std::sin(c.roll), k = c.size / S;
 		/* crop (u,v) -> image: centre + R(roll) * ((u,v) - 128) * k */
+		auto t0 = std::chrono::steady_clock::now();
 		std::vector<float> in((size_t)S * S * 3);
 		float px[3];
 		for (int v = 0; v < S; v++)
@@ -210,7 +213,11 @@ private:
 		Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 		int64_t shape[4] = {1, S, S, 3};
 		Ort::Value t = Ort::Value::CreateTensor<float>(mem, in.data(), in.size(), shape, 4);
-		auto out = lmk.session.Run(Ort::RunOptions{nullptr}, lmk.in.data(), &t, 1, lmk.out.data(), lmk.out.size());
+		auto t1 = std::chrono::steady_clock::now();
+		auto out = lmk->run(t);
+		auto t2 = std::chrono::steady_clock::now();
+		prof(std::chrono::duration<double, std::milli>(t1 - t0).count(),
+		     std::chrono::duration<double, std::milli>(t2 - t1).count());
 		const float *pts = out[0].GetTensorData<float>();
 		presence = 1.0f / (1.0f + std::exp(-out[1].GetTensorData<float>()[0]));
 		for (int i = 0; i < 478; i++) {
@@ -221,7 +228,27 @@ private:
 		return true;
 	}
 
-	OrtModel det, lmk;
+	void prof(double pre, double run)
+	{
+		static const bool on = getenv("DEWY_PROFILE") != nullptr;
+		if (!on)
+			return;
+		p_pre += pre;
+		p_run += run;
+		p_max = std::max(p_max, run);
+		if (++p_n == 300) {
+			char b[160];
+			snprintf(b, sizeof(b), "landmarks profile: preprocess %.2f ms, Run %.2f ms (max %.2f) over 300 calls",
+				 p_pre / p_n, p_run / p_n, p_max);
+			ort_log("%s", b);
+			p_pre = p_run = p_max = 0;
+			p_n = 0;
+		}
+	}
+	double p_pre = 0, p_run = 0, p_max = 0;
+	int p_n = 0;
+
+	OrtModelPtr det, lmk;
 	bool ready = false, have_prev = false;
 	float mesh[478 * 2] = {};
 };

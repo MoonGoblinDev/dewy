@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -155,8 +156,13 @@ struct Worker {
 } // namespace
 
 struct face_tracker {
+	/* Models load on the worker threads (DirectML session creation takes ~1 s), so creating
+	 * the filter never blocks OBS. Each worker stays "busy" until its models are ready, so
+	 * frames submitted meanwhile are simply dropped. */
+	std::string models_dir;
 	std::unique_ptr<TrackerBackend> backend;
 	std::unique_ptr<SkinSegmenter> segmenter;
+	std::atomic<bool> backend_ready{false};
 	Worker lm, seg;
 	std::atomic<bool> seg_enabled{false};
 
@@ -250,6 +256,11 @@ void face_tracker::smooth(ft_face &f, uint64_t ts)
 
 void face_tracker::run_landmarks()
 {
+#if !defined(BEAUTY_TRACKER_VISION)
+	backend = create_onnx_backend(models_dir);
+#endif
+	backend_ready = true;
+	lm.busy = false;
 	for (;;) {
 		std::unique_lock<std::mutex> lk(lm.m);
 		lm.cv.wait(lk, [this] { return lm.has_job || lm.quit; });
@@ -299,7 +310,7 @@ void face_tracker::run_landmarks()
 			last_seen_ns = now_ns();
 		}
 		float ms = (float)((double)(now_ns() - t0) / 1e6);
-		mean_ms += 0.05f * (ms - mean_ms);
+		mean_ms = mean_ms > 0.0f ? mean_ms + 0.05f * (ms - mean_ms) : ms;
 		detect_ratio += 0.05f * ((full ? 1.0f : 0.0f) - detect_ratio);
 		processed_id = lm.id;
 		lm.busy = false;
@@ -309,6 +320,9 @@ void face_tracker::run_landmarks()
 
 void face_tracker::run_segmentation()
 {
+	if (!models_dir.empty())
+		segmenter = std::make_unique<SkinSegmenter>(models_dir);
+	seg.busy = false;
 	for (;;) {
 		std::unique_lock<std::mutex> lk(seg.m);
 		seg.cv.wait(lk, [this] { return seg.has_job || seg.quit; });
@@ -322,7 +336,7 @@ void face_tracker::run_segmentation()
 		bool ok = false;
 		if (segmenter && segmenter->ready()) {
 			ok = segmenter->run(seg.buf.data(), seg.w, seg.h, seg.w * 4, m, mw, mh);
-		} else if (backend) { /* person-only fallback (e.g. Apple Vision) -> alpha channel */
+		} else if (backend_ready && backend) { /* person-only fallback (Apple Vision) -> alpha */
 			std::vector<uint8_t> p;
 			ok = backend->segment(seg.buf.data(), seg.w, seg.h, seg.w * 4, p, mw, mh);
 			if (ok) {
@@ -366,14 +380,12 @@ void face_tracker::run_segmentation()
 extern "C" face_tracker_t *face_tracker_create(const char *models_dir)
 {
 	auto *t = new face_tracker();
-	(void)models_dir;
+	t->models_dir = models_dir ? models_dir : "";
 #if defined(BEAUTY_TRACKER_VISION)
-	t->backend = create_vision_backend();
-#else
-	t->backend = create_onnx_backend(models_dir ? models_dir : "");
+	t->backend = create_vision_backend(); /* cheap: no models to load */
 #endif
-	if (models_dir && *models_dir)
-		t->segmenter = std::make_unique<SkinSegmenter>(models_dir);
+	t->lm.busy = true; /* until the worker has loaded its models */
+	t->seg.busy = true;
 	t->lm.thread = std::thread([t] { t->run_landmarks(); });
 	t->seg.thread = std::thread([t] { t->run_segmentation(); });
 	return t;
@@ -397,7 +409,7 @@ extern "C" void face_tracker_destroy(face_tracker_t *t)
 
 extern "C" const char *face_tracker_backend_name(face_tracker_t *t)
 {
-	return t && t->backend ? t->backend->name() : "none";
+	return t && t->backend_ready && t->backend ? t->backend->name() : "loading";
 }
 
 extern "C" bool face_tracker_busy(face_tracker_t *t)

@@ -8,8 +8,9 @@
 namespace beauty {
 
 struct SkinSegmenter::Impl {
-	OrtModel multiclass; /* [1,256,256,3] RGB 0..1 -> logits [1,256,256,6] */
-	OrtModel person;     /* fallback: [1,3,144,256] -> alpha [1,1,144,256] (person only) */
+	OrtModelPtr multiclass; /* [1,256,256,3] RGB 0..1 -> logits [1,256,256,6] */
+	OrtModelPtr person;     /* fallback: [1,3,144,256] -> alpha [1,1,144,256] (person only) */
+	std::string desc;
 	std::vector<float> input;
 };
 
@@ -35,9 +36,14 @@ bool SkinSegmenter::ready() const
 
 const char *SkinSegmenter::describe() const
 {
-	if (impl->multiclass)
-		return impl->multiclass.accelerated ? "multiclass (GPU/ANE)" : "multiclass (CPU)";
-	return impl->person ? "person only (fallback)" : "unavailable";
+	if (impl->desc.empty()) {
+		if (impl->multiclass)
+			impl->desc = std::string("multiclass (") +
+				     (impl->multiclass->accelerated ? ort_accel_name() : "CPU") + ")";
+		else
+			impl->desc = impl->person ? "person only (fallback)" : "unavailable";
+	}
+	return impl->desc.c_str();
 }
 
 bool SkinSegmenter::run(const uint8_t *bgra, int w, int h, int stride, std::vector<uint8_t> &rgba, int &mw, int &mh)
@@ -67,8 +73,7 @@ bool SkinSegmenter::run(const uint8_t *bgra, int w, int h, int stride, std::vect
 				}
 			int64_t shape[4] = {1, S, S, 3};
 			Ort::Value t = Ort::Value::CreateTensor<float>(mem, impl->input.data(), impl->input.size(), shape, 4);
-			auto out = impl->multiclass.session.Run(Ort::RunOptions{nullptr}, impl->multiclass.in.data(), &t, 1,
-								 impl->multiclass.out.data(), 1);
+			auto out = impl->multiclass->run(t, 1);
 			const float *lg = out[0].GetTensorData<float>();
 			mw = mh = S;
 			rgba.resize((size_t)S * S * 4);
@@ -99,8 +104,7 @@ bool SkinSegmenter::run(const uint8_t *bgra, int w, int h, int stride, std::vect
 			}
 		int64_t shape[4] = {1, 3, H, W};
 		Ort::Value t = Ort::Value::CreateTensor<float>(mem, impl->input.data(), impl->input.size(), shape, 4);
-		auto out = impl->person.session.Run(Ort::RunOptions{nullptr}, impl->person.in.data(), &t, 1,
-						    impl->person.out.data(), 1);
+		auto out = impl->person->run(t, 1);
 		const float *a = out[0].GetTensorData<float>();
 		mw = W;
 		mh = H;
