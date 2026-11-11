@@ -11,16 +11,7 @@
 regular video filter, with no virtual camera. Skin smoothing, tone, face reshaping, makeup,
 stickers, ambience, colour filters and virtual studio lighting, all controlled from one dock.
 
-
-
 https://github.com/user-attachments/assets/15238be5-787a-48c5-b02a-7659ed85f954
-
-
-
-
-<p align="center">The real Dewy dock in OBS: skin and reshape sliders, makeup, stickers, ambience, filters and light,
-then one-click presets and saving your own look. Dewy on top, the original camera below.</p>
-
 
 ## Why Dewy
 
@@ -28,13 +19,10 @@ Most beauty filters paint over the skin: they blur it, then blend a skin colour 
 makes faces look flat and plastic, because the paint also covers the light and shadow that give a
 face its shape.
 
-Dewy edits skin the way skin actually works. In optical density, every skin pixel is
-**melanin + hemoglobin + shading**, and Dewy calibrates the first two on *your* skin and *your*
-camera every two seconds. Skin tone changes melanin. Foundation evens out melanin and hemoglobin
-blotches. Redness removes excess hemoglobin. Makeup is deposited as a pigment layer. The
-shading (your lighting, your shadows, the 3-D form of your face) is never touched. Measured, it
-keeps 98–102 % of the original shadow depth; Dewy's own earlier paint-over version kept only 59–67 %.
-The details are in [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md).
+Dewy edits skin the way skin actually works. Every skin pixel is **melanin + hemoglobin + shading**,
+and Dewy calibrates the first two on *your* skin and *your* camera. Skin tone, foundation, redness
+and makeup change the pigments; the shading (your lighting, your shadows, the shape of your face) is
+never touched.
 
 ## Features
 
@@ -49,12 +37,9 @@ The details are in [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md).
 | **Light** | 9 whole-body virtual lights (key, rim, fill, background dim) that follow your real silhouette |
 
 - Every tab has its own on/off switch, and the dock's thumbnails are rendered from your own face.
-- When a new version is out, the dock shows a notice with a download button. Dewy checks GitHub's
-  public releases at most once a day and sends nothing else; turn it off under
-  **Enhance → Appearance → Advanced → Check for updates**.
-- Landmarks are tracked frame-synchronised, so makeup and stickers stay stuck to your face.
-- Skin edits use a learned segmenter (face skin, body skin, hair, clothes), so the neck and hands match
-  the face, and walls, doors and shirts are never treated as skin.
+- Makeup and stickers stay locked to your face as you move.
+- Only skin is edited: walls, doors and clothes are left alone, and your neck and hands match your face.
+- Control looks from a Stream Deck or any obs-websocket tool.
 
 ## Install
 
@@ -71,201 +56,23 @@ Then start OBS:
 2. Pick your camera in the dock and press **Add Dewy to this source**, or add the **Dewy** filter to
    any video source from its Filters window.
 
-**Requirements:** OBS Studio 33 on macOS (Apple Silicon) or Windows 10/11 x64 with a DirectX 12 GPU.
-Windows was first tested on a real PC in November 2026 (see [docs/windows-plan.md](docs/windows-plan.md)
-for the known issues and the fix plan).
+**Requirements:** OBS Studio 33 or later on macOS (Apple Silicon) or Windows 10/11 x64 with a
+DirectX 12 GPU.
+
+**Updates:** when a new version is out, the dock shows a notice with a download link. Dewy checks
+GitHub's public releases at most once a day and sends nothing else; turn it off under
+**Enhance → Appearance → Advanced → Check for updates**.
 
 ## Performance
 
-Measured on an M4 Pro MacBook Pro with a 1080p30 camera in a 1080p60 OBS canvas. The extra cost
-of the filter barely depends on which features are on:
+On an M4 Pro MacBook Pro (1080p camera, 1080p60
+canvas), Dewy with every tab on adds under 1 ms of OBS render time per frame and about 15 % of one
+CPU core, with no skipped frames. Face tracking and segmentation run mostly on the Neural Engine on
+macOS and on the GPU (DirectML) on Windows.
 
-| | Filter off | Dewy on (every tab active) |
-|---|---|---|
-| OBS render time per frame | 5.4 ms | 6.0–6.2 ms |
-| OBS CPU | baseline | about +15 % of one core |
-| GPU | baseline | about +7–9 % |
-| Skipped frames | 0 | 0 |
+## Building from source
 
-Face tracking runs on Apple Vision, and segmentation runs mostly on the Neural Engine (Core ML via
-ONNX Runtime), so little of the work competes with a game for the GPU.
-
-### Windows
-
-Measured on a laptop with an Intel i5-9300H, a GeForce GTX 1050 Ti (OBS renders on it; an Intel UHD 630
-is also present), OBS 33.0.1, 1080p canvas, with a 640×360 24 fps talking-head video as the source.
-Landmarks and segmentation run on DirectML, on the same GPU as OBS.
-
-| | Filter off | Dewy on (default) | Dewy on, every tab active |
-|---|---|---|---|
-| OBS render time per frame, 30 fps canvas | 1.0–1.3 ms | 1.6–2.2 ms | 1.6 ms |
-| OBS render time per frame, 60 fps canvas | 0.9 ms | 2.2 ms | |
-| OBS CPU (share of one core) | 2 % | 22–24 % | 21 % |
-| GPU utilisation | 9 % | 33 % | 33 % |
-| Skipped frames | 0 | 0 | 0 |
-| Face tracking per frame (worker thread) | n/a | 17–20 ms | 17–20 ms |
-| Adding the filter | | 53 ms (was 1.3 s) | |
-
-*Lock effects to the face* adapts to the tracker's speed. Here that means a 2-frame video delay at 30 fps
-and 3 frames at 60 fps, and the render thread never waits. Before the Windows fixes, the same machine
-spent 5.4 ms per frame with the filter on, ran all inference on the Intel iGPU, and froze OBS for
-1.3 s when the filter was added. The details are in [docs/windows-plan.md](docs/windows-plan.md).
-CPU inference (`DEWY_ORT_CPU=1`) was no faster than DirectML and used 4–7× the CPU.
-
-## How it works
-
-- **Face tracking.** On macOS, Apple Vision provides 76 landmarks with seeded tracking. The ONNX
-  backend (Windows, or optionally macOS) runs MediaPipe Face Landmarker v2 (478 points) with
-  OpenCV YuNet for re-detection. Both feed one portable core (`src/tracker/tracker-core.cpp`):
-  One-Euro smoothing, frame history with interpolation, frame sync, and repeated-frame detection.
-- **Segmentation.** MediaPipe's selfie multiclass model runs about 15 times a second. Its mask is
-  snapped to the frame's real edges on the GPU with joint-bilateral upsampling.
-- **Skin.** Frequency separation (base / blemish band / fine grain) handles smoothing. Colour
-  edits (tone, foundation, redness, makeup) happen in optical density on the calibrated
-  melanin and hemoglobin directions. See [research/pigment/](research/pigment/).
-- **Everything else** is GPU shaders in OBS's own render pipeline (`data/effects/`): face warp,
-  makeup, LUTs, particles and relighting.
-
-## Build from source
-
-### macOS (Apple Silicon)
-
-Needs Xcode command-line tools, CMake 3.24+ and OBS Studio 33 installed in `/Applications`.
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build build --target install-plugin   # installs into ~/Library/Application Support/obs-studio/plugins
-```
-
-The first configure downloads the OBS 33.0.0 headers, SIMDe, OBS's Qt 6.11 headers, ONNX Runtime
-and the models into `.deps/` and `data/models/`. The plugin links against the frameworks inside
-OBS.app.
-
-### Windows x64
-
-Needs Visual Studio 2022+ (or its Build Tools) with the C++ workload, and CMake 3.24+. The CMake that
-ships with Visual Studio works.
-
-```bat
-cmake -S . -B build -A x64
-cmake --build build --config Release
-cpack --config build/CPackConfig.cmake -C Release -B dist
-```
-
-Unzip `dist/dewy-<version>-windows-x64.zip` into `C:\ProgramData\obs-studio\plugins\`, OBS's
-per-machine plugin folder (no admin rights, survives OBS updates). ONNX Runtime with DirectML ships renamed as
-`dewy-onnxruntime.dll` and is loaded by full path, so it can't clash with another plugin's copy.
-
-To try the ONNX tracking backend on macOS: `cmake -S . -B build-onnx -DBEAUTY_TRACKER=onnx`.
-
-For development on Windows, close OBS and run
-`cmake --build build --config Release --target install-plugin`. It installs into
-`C:\ProgramData\obs-studio\plugins\dewy`, which needs no admin rights.
-
-Environment variables for diagnosing inference (set them before starting OBS):
-`DEWY_PROFILE=1` logs the landmark pass's preprocessing and `Run` times, `DEWY_ORT_CPU=1` forces CPU
-inference, and `DEWY_DML_ADAPTER=<n>` overrides the DirectML adapter, which otherwise matches OBS's own.
-
-## Development
-
-`tools/obsctl.py` drives OBS through obs-websocket. It reads the password from OBS's own config.
-
-```sh
-python3 tools/obsctl.py set "Video Capture Device" smooth=80 eye_size=40
-python3 tools/obsctl.py reload "Video Capture Device"     # after editing .effect files
-python3 tools/obsctl.py shot "Video Capture Device" out.png 1280
-```
-
-- Shader edits only need `install-plugin` followed by `reload`, because effects are compiled from
-  source and bypass libobs's effect cache.
-- C, Objective-C and preset JSON changes need an OBS restart.
-- To render every dock tab to PNG, create `plugin_config/dewy/snapshot/` in OBS's config folder
-  (`~/Library/Application Support/obs-studio/` on macOS, `%APPDATA%\obs-studio\` on Windows) and
-  restart OBS.
-
-### Releasing
-
-Releases are built by GitHub Actions (`.github/workflows/release.yml`) and only run when a version
-tag is pushed:
-
-1. Set the version in `CMakeLists.txt` (`project(dewy VERSION 0.1.0 ...)`) and commit it.
-2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`. The tag must match the version.
-3. The workflow builds Windows and macOS. On macOS it signs the plugin and its bundled ONNX Runtime
-   (Developer ID, hardened runtime), builds a `.pkg`, has Apple notarize it and staples the ticket.
-   It then creates a **draft** release with both downloads and `SHA256SUMS.txt`; review it and press
-   **Publish**.
-
-The macOS job needs these repository secrets (Settings → Secrets and variables → Actions):
-
-| Secret | What it is |
-|---|---|
-| `MACOS_CERTIFICATE_P12_BASE64` | Your **Developer ID Application** certificate and private key, plus the **Developer ID Installer** one, exported together from Keychain Access as one `.p12`, base64-encoded |
-| `MACOS_CERTIFICATE_PASSWORD` | The password you set when exporting the `.p12` |
-| `MACOS_NOTARY_APPLE_ID` | The Apple ID email of your developer account |
-| `MACOS_NOTARY_TEAM_ID` | Your 10-character team ID |
-| `MACOS_NOTARY_PASSWORD` | An app-specific password for that Apple ID (appleid.apple.com → Sign-In and Security) |
-
-Without a Developer ID Installer certificate in the `.p12`, the macOS download is a signed,
-notarized `.zip` of the plugin instead of a `.pkg`. To test packaging locally without signing:
-`VERSION=0.1.0 UNSIGNED_PKG=1 tools/package-macos.sh`.
-
-### Automating the dock
-
-Dewy registers an obs-websocket vendor, `dewy`, so scripts, Stream Deck or demo tools can drive the dock
-(the filter's settings themselves are set with the regular `SetSourceFilterSettings`):
-
-```json
-{"requestType": "CallVendorRequest", "requestData": {"vendorName": "dewy", "requestType": "show",
-  "requestData": {"tab": "atmosphere", "sub": "motion"}}}
-{"requestType": "CallVendorRequest", "requestData": {"vendorName": "dewy", "requestType": "focus",
-  "requestData": {"target": "face_slim"}}}
-```
-
-- `show`: `tab` is `enhance`, `effects`, `atmosphere`, `filters` or `light`. The optional `sub` is
-  `appearance`, `makeup`, `customise`, `ambience` or `motion`.
-- `focus` brings a control into view. `target` is a slider key (`smooth`, `face_slim`, `eye_size`, …),
-  `look:<name>` (`look:Rose`), `preset:<name>`, `mypreset:<name>`, or `<setting>:<preset>`
-  (`effect_preset:Kitty`, `atmo_preset:Sparkles`, `filter_preset:Fresh`, `light_preset:Neon`).
-  The response is `{"ok": true}` when the target exists.
-- `apply` applies a full look: `{"target": "preset:Golden Hour"}` or `{"target": "mypreset:My look 1"}`.
-  Handy on a Stream Deck button.
-- `save` saves the current look as a new preset, `reset` presses Reset on the current tab, and
-  `tabs_scroll` (`{"dir": 1}`) scrolls the tab strip.
-- `locate` returns where a control is on screen (`x`, `y`, `w`, `h`, plus `kx`, `ky` for a slider's knob).
-  It's used to script demo videos.
-
-### Adding content
-
-- **Filters:** add an entry to `data/filters.json` (exposure, contrast, curve, saturation, vibrance,
-  warmth, tint, hue, fade, rolloff, per-channel gamma, shadows / highlights, mono).
-- **Stickers:** draw an SVG in `art/stickers/`, render it to `data/stickers/<name>.png`, and add an
-  effect to `data/effects.json`. Sprites anchor to `eyes`, `eye_l`, `eye_r`, `nose`, `mouth`, `chin`,
-  `forehead`, `head_top`, `cheek_l` or `cheek_r`, with offsets and widths in eye-distance units, an
-  optional `anim` (bob, pulse, spin, sway, twinkle) and `blend` (normal, add, multiply).
-- **Lights and ambiences:** `data/lights.json` and `data/atmosphere.json`.
-- **Presets:** `data/looks.json`. A look lists only the settings it changes; everything else is reset
-  to its default when the look is applied.
-
-### Project layout
-
-```
-src/beauty-filter.c        the OBS filter: passes, uniforms, tracking hand-off
-src/tracker/               face tracking, segmentation, pigment calibration
-src/dock/                  the Qt dock (no moc)
-data/effects/              GPU shaders
-data/*.json, data/makeup/  presets (looks.json: the Presets tab)
-art/brand/                 the Dewy logo (SVG sources and PNGs)
-research/pigment/          the pigment-model prototype and its findings
-tests/                     tracking jitter / lag harnesses (need updating for the current tracker)
-```
-
-## Roadmap
-
-- Prebuilt releases for macOS
-- Windows: test on more GPUs (RTX, Radeon, iGPU-only), and an FP16 landmark model for GPUs with fast
-  FP16 ([plan](docs/windows-plan.md))
-- Validate the pigment model across a wide range of skin tones
-- Multiple faces, Linux
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Credits
 
