@@ -31,6 +31,7 @@
 #include <QtWidgets/QStackedWidget>
 #include <QtWidgets/QVBoxLayout>
 
+#include <climits>
 #include <map>
 #include <string>
 #include <vector>
@@ -323,7 +324,8 @@ public:
 	void scrollTabs(bool right) { topTabs->scrollStep(right); }
 	void resetTab() { resetCurrentTab(); }
 	/* Automation: global (screen) rectangle of a control, and the knob of a slider. */
-	bool locate(const std::string &t, QRect &r, QPointF &knob, bool &hasKnob, double &shown)
+	bool locate(const std::string &t, QRect &r, QPointF &knob, bool &hasKnob, double &shown, int value = INT_MIN,
+		    int *range = nullptr)
 	{
 		auto it = locators.find(t);
 		if (it == locators.end() || !it->second || !it->second->isVisible())
@@ -335,8 +337,13 @@ public:
 		shown = w->width() * w->height() > 0 ? (double)(vis.width() * vis.height()) / (w->width() * w->height()) : 0.0;
 		hasKnob = false;
 		if (auto *sl = dynamic_cast<TTSlider *>(w)) {
-			knob = QPointF(w->mapToGlobal(sl->knobPos().toPoint()));
+			QPointF k = value == INT_MIN ? sl->knobPos() : sl->knobAt(value);
+			knob = QPointF(w->mapToGlobal(QPoint(0, 0))) + k;
 			hasKnob = true;
+			if (range) {
+				range[0] = sl->minimum();
+				range[1] = sl->maximum();
+			}
 		}
 		return true;
 	}
@@ -810,6 +817,11 @@ QWidget *BeautyDock::categorySection(const FeatureGroup &c)
 			reveal(PG_ENHANCE, w);
 		};
 		locators[std::string("opt:") + c.opts[i].key] = buttons[i];
+		focusers[std::string("opt:") + c.opts[i].key] = [this, b = buttons[i]]() { /* scroll only */
+			showTab(PG_ENHANCE);
+			showEnhanceSub(0);
+			reveal(PG_ENHANCE, b);
+		};
 		locators[std::string("slider:") + c.opts[i].key] = row->slider;
 	}
 
@@ -1204,6 +1216,10 @@ QWidget *BeautyDock::buildPresets()
 		"QPushButton:hover { background:#ffaac6; } QPushButton:pressed { background:#f584a8; }");
 	QObject::connect(saveBtn, &QPushButton::clicked, this, [this]() { saveCurrentLook(); });
 	locators["save_look"] = saveBtn;
+	focusers["save_look"] = [this]() { /* scroll only */
+		showTab(PG_PRESETS);
+		reveal(PG_PRESETS, saveBtn);
+	};
 	head->addWidget(saveBtn);
 	v->addLayout(head);
 
@@ -1478,6 +1494,11 @@ QWidget *BeautyDock::buildEnhance()
 			       [this](int i) { enhanceStack->setCurrentIndex(i); }));
 	locators["sub:appearance"] = subTabs[0];
 	locators["sub:makeup"] = subTabs[1];
+	for (int i = 0; i < 2; i++)
+		focusers[i ? "sub:makeup" : "sub:appearance"] = [this, i]() { /* scroll only */
+			showTab(PG_ENHANCE);
+			reveal(PG_ENHANCE, subTabs[i]);
+		};
 	enhanceStack->addWidget(buildAppearance());
 	enhanceStack->addWidget(buildMakeup());
 	fitStackToCurrent(enhanceStack);
@@ -1627,6 +1648,11 @@ QWidget *BeautyDock::buildAtmosphere()
 	v->addWidget(subTabRow(page, {"Ambience", "Motion"}, atmoTabs, [stack](int i) { stack->setCurrentIndex(i); }));
 	locators["sub:ambience"] = atmoTabs[0];
 	locators["sub:motion"] = atmoTabs[1];
+	for (int i = 0; i < 2; i++)
+		focusers[i ? "sub:motion" : "sub:ambience"] = [this, i]() {
+			showTab(PG_ATMO);
+			reveal(PG_ATMO, atmoTabs[i]);
+		};
 	struct Sub {
 		const char *items, *key, *amtKey;
 		int def;
@@ -2005,8 +2031,11 @@ static void vendor_locate(obs_data_t *req, obs_data_t *res, void *)
 	QRect r;
 	QPointF knob;
 	double shown = 0;
+	int value = obs_data_has_user_value(req, "value") ? (int)obs_data_get_int(req, "value") : INT_MIN;
+	int range[2] = {0, 100};
 	if (g_dock)
-		QMetaObject::invokeMethod(g_dock, [&]() { ok = g_dock && g_dock->locate(target, r, knob, hasKnob, shown); },
+		QMetaObject::invokeMethod(g_dock,
+					  [&]() { ok = g_dock && g_dock->locate(target, r, knob, hasKnob, shown, value, range); },
 					  Qt::BlockingQueuedConnection);
 	obs_data_set_bool(res, "ok", ok);
 	if (!ok)
@@ -2019,6 +2048,8 @@ static void vendor_locate(obs_data_t *req, obs_data_t *res, void *)
 	if (hasKnob) {
 		obs_data_set_double(res, "kx", knob.x());
 		obs_data_set_double(res, "ky", knob.y());
+		obs_data_set_int(res, "min", range[0]);
+		obs_data_set_int(res, "max", range[1]);
 	}
 }
 

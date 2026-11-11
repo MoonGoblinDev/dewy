@@ -54,6 +54,9 @@ public:
 	void setValue(int v); /* programmatic: no callback */
 	int value() const { return val; }
 	QPointF knobPos() const { return QPointF(xOf(val), height() / 2.0); } /* automation */
+	QPointF knobAt(int v) const { return QPointF(xOf(v), height() / 2.0); }
+	int minimum() const { return min; }
+	int maximum() const { return max; }
 	void setRange(int mn, int mx, int d)
 	{
 		min = mn;
