@@ -49,8 +49,8 @@ There are no prebuilt releases yet. Build from source (below), then restart OBS.
 2. Pick your camera in the dock and press **Add Dewy to this source**, or add the **Dewy** filter to
    any video source from its Filters window.
 
-**Requirements:** OBS Studio 33 and macOS on Apple Silicon (tested). The Windows build is
-written but **has not been compiled or tested yet**, so expect fixes to be needed.
+**Requirements:** OBS Studio 33 and macOS on Apple Silicon (tested). The Windows build compiles
+in CI but **hasn't been run on a Windows PC yet**, so expect fixes to be needed.
 
 ## Performance
 
@@ -98,7 +98,7 @@ The first configure downloads the OBS 33.0.0 headers, SIMDe, OBS's Qt 6.11 heade
 and the models into `.deps/` and `data/models/`. The plugin links against the frameworks inside
 OBS.app.
 
-### Windows x64 (untested)
+### Windows x64 (builds in CI, not yet tested on a PC)
 
 Needs Visual Studio 2022+ with the C++ workload, and CMake 3.24+.
 
@@ -155,7 +155,7 @@ tests/                     tracking jitter / lag harnesses (need updating for th
 ## Roadmap
 
 - Prebuilt releases for macOS
-- Compile and test the Windows build
+- Test the Windows build on real hardware
 - Validate the pigment model across a wide range of skin tones
 - Multiple faces, Linux
 
