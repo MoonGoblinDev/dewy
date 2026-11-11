@@ -9,7 +9,7 @@ extern "C" {
 
 /* All strengths are slider/100: 0..1 for one-sided controls, -1..1 for bipolar ones. */
 struct beauty_shape {
-	/* Face */
+	/* Face: natural, slim, V-shape, small, narrow, cheekbone, jawbone, chin, forehead, head size */
 	float face_natural, face_slim, face_v, face_small, face_narrow;
 	float cheekbone, jawbone, chin, forehead, head;
 	/* Eyes (BigEye, Eye_Spacing, MoveEye, fd_eye (tilt), inner/outer corner, lower eyelid, pupil) */

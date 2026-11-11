@@ -1,5 +1,5 @@
 /*
- * Dewy dock: a streaming-app-style control panel for the Dewy filter.
+ * Dewy dock: the control panel for the Dewy filter.
  * Edits go straight into the filter's settings (obs_source_update), and the dock listens to
  * the filter's "update" signal so changes made elsewhere (Filters window, websocket) show up.
  */

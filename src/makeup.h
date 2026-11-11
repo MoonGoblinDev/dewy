@@ -2,8 +2,8 @@
 
 #include <obs-module.h>
 
-/* Makeup tab: a preset (filter grade + makeup look) with two global intensities, like
- * the Filter / Makeup sliders, plus every part exposed for customising. */
+/* Makeup tab: a preset (filter grade + makeup look) with two global intensities (Filter and
+ * Makeup), plus every part exposed for customising. */
 struct makeup_params {
 	float filter_amt, makeup_amt; /* 0..1 */
 

@@ -94,7 +94,7 @@ public:
 	std::function<void(int)> onChanged;
 };
 
-/* ---------- round feature button (streaming-app "face / eyes / nose" chips) ---------- */
+/* ---------- round feature button ("face / eyes / nose" chips) ---------- */
 
 class CircleButton : public QWidget {
 public:

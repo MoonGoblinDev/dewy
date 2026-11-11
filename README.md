@@ -93,8 +93,6 @@ ONNX Runtime), so little of the work competes with a game for the GPU.
 - **Everything else** is GPU shaders in OBS's own render pipeline (`data/effects/`): face warp,
   makeup, LUTs, particles and relighting.
 
-[docs/RESEARCH.md](docs/RESEARCH.md) maps each control to the technique behind it.
-
 ## Build from source
 
 ### macOS (Apple Silicon)
@@ -210,7 +208,7 @@ Model sources and licenses are listed in [data/models/NOTICE.md](data/models/NOT
 model follows Tsumura et al., *Image-based skin color and texture analysis/synthesis by extracting
 hemoglobin and melanin information in the skin* (SIGGRAPH 2003).
 
-Dewy is an independent project, not affiliated with streaming-app or OBS.
+Dewy is an independent project, not affiliated with the OBS Project.
 
 ## License
 
