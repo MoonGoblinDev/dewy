@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="art/brand/dewy-wordmark-white.png">
+    <img src="art/brand/dewy-wordmark.png" alt="Dewy" width="300">
+  </picture>
+</p>
+
 # Dewy
 
 **Real-time beauty for OBS.** A face-aware beauty filter that runs natively inside OBS, as a
@@ -5,13 +12,13 @@ regular video filter, with no virtual camera. Skin smoothing, tone, face reshapi
 stickers, ambience, colour filters and virtual studio lighting, all controlled from one dock.
 
 <p align="center">
-  <img src="docs/media/demo.webp" alt="Dewy demo: the real Dewy dock in OBS on the left goes through skin sliders, reshaping, makeup looks, stickers, ambience, filters and lights, while the right shows Dewy on top and the original camera below" width="1280">
+  <img src="docs/media/demo.webp" alt="Dewy demo: a cursor works the real Dewy dock in OBS (presets, skin sliders, reshaping, makeup looks, stickers, ambience, filters, lights, saving a preset) while the right shows Dewy on top and the original camera below; then the full OBS window running Dewy live" width="960">
 </p>
-<p align="center">The real Dewy dock driving the filter live in OBS: skin, reshaping, makeup, stickers, ambience,
-filters and light. Dewy on top, the original camera below.<br>
-<a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 1080p, 1 min)</a></p>
+<p align="center">The real Dewy dock in OBS: one-click presets, skin and reshape sliders, makeup, stickers, ambience,
+filters and light, then saving your own look. Dewy on top, the original camera below.<br>
+<a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 1080p, 1.5 min)</a></p>
 
-![OBS with the Dewy dock: a streamer in the preview, the Enhance tab showing Smooth, Foundation, Skin tone and Redness sliders](docs/media/obs-dewy.png)
+![OBS with the Dewy dock: a streamer in the preview with the Dewy look applied, and the dock's Presets tab](docs/media/obs-dewy.png)
 
 ## Why Dewy
 
@@ -31,6 +38,7 @@ The details are in [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md).
 
 | Tab | What it does |
 |---|---|
+| **Presets** | 26 one-click full looks (Everyday, Glam, Studio, Mood, Men) that set every tab at once, plus your own: save the current look in one click, right-click to rename or delete |
 | **Enhance → Appearance** | Smooth (keeps pores and grain), Foundation, Skin tone (lighter / deeper), Redness, Shadows (dark circles), smile lines, teeth whitening, bright eyes, clarity, plus 27 reshape sliders for face, eyes, nose, mouth and brows |
 | **Enhance → Makeup** | 15 looks, or build your own: lipstick and gloss, blush (3 placements), eyeshadow, eyeliner, contour, highlight, brow tint, colour grade and `.cube` LUTs |
 | **Effects** | 23 face-tracked stickers and distortions (ears, glasses, crowns, freckles, …) |
@@ -147,8 +155,15 @@ Dewy registers an obs-websocket vendor, `dewy`, so scripts, Stream Deck or demo 
 - `show`: `tab` is `enhance`, `effects`, `atmosphere`, `filters` or `light`. The optional `sub` is
   `appearance`, `makeup`, `customise`, `ambience` or `motion`.
 - `focus` brings a control into view. `target` is a slider key (`smooth`, `face_slim`, `eye_size`, …),
-  `look:<name>` (`look:Rose`), or `<setting>:<preset>` (`effect_preset:Kitty`, `atmo_preset:Sparkles`,
-  `filter_preset:Fresh`, `light_preset:Neon`). The response is `{"ok": true}` when the target exists.
+  `look:<name>` (`look:Rose`), `preset:<name>`, `mypreset:<name>`, or `<setting>:<preset>`
+  (`effect_preset:Kitty`, `atmo_preset:Sparkles`, `filter_preset:Fresh`, `light_preset:Neon`).
+  The response is `{"ok": true}` when the target exists.
+- `apply` applies a full look: `{"target": "preset:Golden Hour"}` or `{"target": "mypreset:My look 1"}`.
+  Handy on a Stream Deck button.
+- `save` saves the current look as a new preset, `reset` presses Reset on the current tab, and
+  `tabs_scroll` (`{"dir": 1}`) scrolls the tab strip.
+- `locate` returns where a control is on screen (`x`, `y`, `w`, `h`, plus `kx`, `ky` for a slider's knob).
+  It's used to script demo videos.
 
 ### Adding content
 
@@ -159,6 +174,8 @@ Dewy registers an obs-websocket vendor, `dewy`, so scripts, Stream Deck or demo 
   `forehead`, `head_top`, `cheek_l` or `cheek_r`, with offsets and widths in eye-distance units, an
   optional `anim` (bob, pulse, spin, sway, twinkle) and `blend` (normal, add, multiply).
 - **Lights and ambiences:** `data/lights.json` and `data/atmosphere.json`.
+- **Presets:** `data/looks.json`. A look lists only the settings it changes; everything else is reset
+  to its default when the look is applied.
 
 ### Project layout
 
@@ -167,7 +184,8 @@ src/beauty-filter.c        the OBS filter: passes, uniforms, tracking hand-off
 src/tracker/               face tracking, segmentation, pigment calibration
 src/dock/                  the Qt dock (no moc)
 data/effects/              GPU shaders
-data/*.json, data/makeup/  presets
+data/*.json, data/makeup/  presets (looks.json: the Presets tab)
+art/brand/                 the Dewy logo (SVG sources and PNGs)
 research/pigment/          the pigment-model prototype and its findings
 tests/                     tracking jitter / lag harnesses (need updating for the current tracker)
 ```

@@ -53,6 +53,7 @@ public:
 	TTSlider(int min, int max, int def, QWidget *parent = nullptr);
 	void setValue(int v); /* programmatic: no callback */
 	int value() const { return val; }
+	QPointF knobPos() const { return QPointF(xOf(val), height() / 2.0); } /* automation */
 	void setRange(int mn, int mx, int d)
 	{
 		min = mn;
@@ -264,6 +265,7 @@ public:
 	}
 	const QString &name() const { return label; }
 	std::function<void()> onClicked;
+	std::function<void(const QPoint &)> onContext; /* right click, global position */
 	bool hasHeightForWidth() const override { return true; }
 	int heightForWidth(int w) const override { return w + 20; }
 	QSize sizeHint() const override { return {96, 116}; }
@@ -302,6 +304,7 @@ public:
 	void setSelected(const QString &name);
 	void setPanel(QWidget *panel) { inlinePanel = panel; }
 	std::function<void(const QString &)> onPicked;
+	std::function<void(const QString &, const QPoint &)> onContext;
 	const std::vector<Item> &itemList() const { return items; }
 	QWidget *tileNamed(const QString &name) const
 	{
@@ -329,6 +332,10 @@ public:
 	void addTab(const QString &text, IconSpec icon);
 	void setCurrent(int i);
 	int current() const { return cur; }
+	QWidget *button(int i) const { return i >= 0 && i < (int)buttons.size() ? (QWidget *)buttons[i] : nullptr; }
+	QWidget *chevron(bool right) const { return right ? rightBtn : leftBtn; }
+	void scrollStep(bool right);
+	void animateTo(int x);
 	std::function<void(int)> onChanged;
 
 private:
@@ -336,6 +343,7 @@ private:
 	QWidget *strip;
 	QHBoxLayout *row;
 	std::vector<QPushButton *> buttons;
+	QWidget *leftBtn = nullptr, *rightBtn = nullptr;
 	int cur = 0;
 };
 

@@ -78,6 +78,9 @@ obs_data_t *presets_filters_root(void);
 obs_data_t *presets_lights_root(void);
 obs_data_t *presets_atmosphere_root(void);
 obs_data_t *presets_effects_root(void);
+obs_data_t *presets_looks_root(void); /* data/looks.json: full looks for the Presets tab */
+/* {"name": name} in root[list] or root.categories[*][list]; new reference or NULL */
+obs_data_t *presets_find_in(obs_data_t *root, const char *list, const char *name);
 
 bool presets_filter(const char *name, struct grade_params *out);
 bool presets_light(const char *name, struct light_params *out);

@@ -27,5 +27,7 @@ QImage effectThumb(const FaceCrop &c, obs_data_t *preset);
 QImage atmoThumb(const FaceCrop &c, obs_data_t *preset);
 QImage motionThumb(const FaceCrop &c, obs_data_t *preset);
 QImage noneThumb(int size);
+/* A full look ({"settings": {...}}): light, filter, ambience and sticker previews layered */
+QImage lookThumb(const FaceCrop &c, obs_data_t *look);
 
 } // namespace beauty

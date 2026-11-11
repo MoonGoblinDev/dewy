@@ -21,6 +21,10 @@
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QInputDialog>
+#include <QtWidgets/QMenu>
+#include <QtWidgets/QScrollBar>
+#include <QtCore/QVariantAnimation>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QScrollArea>
@@ -40,6 +44,21 @@
 using namespace beauty;
 
 static const char *FILTER_ID = "obs_beauty_filter";
+
+/* Dock pages, in tab order. */
+enum DockPage { PG_PRESETS = 0, PG_ENHANCE, PG_EFFECTS, PG_ATMO, PG_FILTERS, PG_LIGHT, PG_COUNT };
+static const char *PAGE_NAMES[PG_COUNT] = {"presets", "enhance", "effects", "atmosphere", "filters", "light"};
+static const char *PAGE_SWITCH[PG_COUNT] = {nullptr, "enhance_on", "effects_on", "atmo_on", "filters_on", "light_on"};
+
+/* Settings a preset never touches: per-source options and debugging. */
+static bool look_key(const char *k)
+{
+	static const char *skip[] = {"all_skin", "show_landmarks", "sync_tracking", "debug_view", "dewy_look"};
+	for (const char *x : skip)
+		if (strcmp(k, x) == 0)
+			return false;
+	return true;
+}
 
 /* ---------------- model (keys/defaults must match beauty-filter.c) ---------------- */
 
@@ -203,20 +222,23 @@ private:
 	void refreshThumbs();
 	const char *tabSwitchKey() const
 	{
-		static const char *keys[] = {"enhance_on", "effects_on", "atmo_on", "filters_on", "light_on"};
-		int i = pages ? pages->currentIndex() : 0;
-		return keys[i < 0 || i > 4 ? 0 : i];
+		int i = pages ? pages->currentIndex() : PG_ENHANCE;
+		return PAGE_SWITCH[i < 0 || i >= PG_COUNT ? PG_ENHANCE : i];
 	}
 	/* header switch shows the current tab's state; switched-off tabs are greyed out */
 	void updateTabSwitch()
 	{
 		if (!filter)
 			return;
-		static const char *keys[] = {"enhance_on", "effects_on", "atmo_on", "filters_on", "light_on"};
-		enableToggle->setChecked(getBool(tabSwitchKey()));
-		for (int i = 0; i < 5 && i < (int)pageScrolls.size(); i++)
+		const char *k = tabSwitchKey();
+		enableToggle->setVisible(k != nullptr); /* Presets has no on/off of its own */
+		if (k)
+			enableToggle->setChecked(getBool(k));
+		if (resetBtn)
+			resetBtn->setToolTip(k ? QStringLiteral("Reset this tab") : QStringLiteral("Reset every tab"));
+		for (int i = 0; i < PG_COUNT && i < (int)pageScrolls.size(); i++)
 			if (QWidget *w = pageScrolls[i]->widget())
-				w->setEnabled(getBool(keys[i]));
+				w->setEnabled(!PAGE_SWITCH[i] || getBool(PAGE_SWITCH[i]));
 	}
 
 	struct ThumbJob {
@@ -231,14 +253,95 @@ private:
 	std::vector<QPushButton *> atmoTabs;
 	QStackedWidget *atmoStack = nullptr;
 	std::map<std::string, std::function<void()>> focusers;
+	std::map<std::string, QPointer<QWidget>> locators; /* automation: where a control is on screen */
+	QPushButton *resetBtn = nullptr, *saveBtn = nullptr;
+	/* presets */
+	obs_data_array_t *myLooks = nullptr;
+	PresetGrid *myGrid = nullptr;
+	std::vector<PresetGrid *> lookGrids;
+	QWidget *buildPresets();
+	void applyLook(obs_data_t *settings, bool builtin, const QString &tag);
+	void saveCurrentLook();
+	void loadMyLooks();
+	void storeMyLooks();
+	void rebuildMyLooks();
+	void refreshMyThumbs();
+	/* scroll a control into view, animated */
 	void reveal(int page, QWidget *w)
 	{
 		QPointer<QWidget> pw(w);
 		QTimer::singleShot(30, this, [this, page, pw]() {
-			if (pw)
-				pageScrolls[page]->ensureWidgetVisible(pw, 0, 90);
+			if (!pw)
+				return;
+			QScrollArea *sa = pageScrolls[page];
+			QWidget *content = sa->widget();
+			if (!content || !content->isAncestorOf(pw))
+				return;
+			QScrollBar *bar = sa->verticalScrollBar();
+			int top = pw->mapTo(content, QPoint(0, 0)).y(), h = pw->height(), view = sa->viewport()->height();
+			int cur = bar->value(), target = cur;
+			const int margin = 70;
+			if (top - margin < cur)
+				target = top - margin;
+			else if (top + h + margin > cur + view)
+				target = top + h + margin - view;
+			target = std::clamp(target, bar->minimum(), bar->maximum());
+			if (target == cur)
+				return;
+			auto *anim = new QVariantAnimation(sa);
+			anim->setStartValue(cur);
+			anim->setEndValue(target);
+			anim->setDuration(450);
+			anim->setEasingCurve(QEasingCurve::InOutCubic);
+			QObject::connect(anim, &QVariantAnimation::valueChanged, bar,
+					 [bar](const QVariant &v) { bar->setValue(v.toInt()); });
+			anim->start(QAbstractAnimation::DeleteWhenStopped);
 		});
 	}
+
+public:
+	/* Automation: apply "preset:<name>" (built-in) or "mypreset:<name>"; save the current look. */
+	bool applyNamed(const std::string &t)
+	{
+		if (t.rfind("preset:", 0) == 0) {
+			obs_data_t *look = presets_find_in(presets_looks_root(), "looks", t.c_str() + 7);
+			if (!look)
+				return false;
+			obs_data_t *st = obs_data_get_obj(look, "settings");
+			applyLook(st, true, QStringLiteral("b:") + QString::fromStdString(t.substr(7)));
+			obs_data_release(st);
+			obs_data_release(look);
+			return true;
+		}
+		if (t.rfind("mypreset:", 0) == 0 && myGrid && myGrid->tileNamed(QString::fromStdString(t.substr(9)))) {
+			myGrid->onPicked(QString::fromStdString(t.substr(9)));
+			return true;
+		}
+		return false;
+	}
+	void saveLook() { saveCurrentLook(); }
+	void scrollTabs(bool right) { topTabs->scrollStep(right); }
+	void resetTab() { resetCurrentTab(); }
+	/* Automation: global (screen) rectangle of a control, and the knob of a slider. */
+	bool locate(const std::string &t, QRect &r, QPointF &knob, bool &hasKnob, double &shown)
+	{
+		auto it = locators.find(t);
+		if (it == locators.end() || !it->second || !it->second->isVisible())
+			return false;
+		QWidget *w = it->second;
+		r = QRect(w->mapToGlobal(QPoint(0, 0)), w->size());
+		/* how much of it is actually on screen (scroll areas clip it) */
+		QRect vis = w->visibleRegion().boundingRect();
+		shown = w->width() * w->height() > 0 ? (double)(vis.width() * vis.height()) / (w->width() * w->height()) : 0.0;
+		hasKnob = false;
+		if (auto *sl = dynamic_cast<TTSlider *>(w)) {
+			knob = QPointF(w->mapToGlobal(sl->knobPos().toPoint()));
+			hasKnob = true;
+		}
+		return true;
+	}
+
+private:
 	QStackedWidget *enhanceStack = nullptr;
 	std::vector<QScrollArea *> pageScrolls;
 	QTimer *thumbTimer = nullptr;
@@ -416,7 +519,7 @@ BeautyDock::BeautyDock()
 	auto *cl = new QVBoxLayout(content);
 	cl->setContentsMargins(0, 0, 0, 0);
 	pages = new QStackedWidget(content);
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < PG_COUNT; i++) {
 		auto *scroll = new QScrollArea(pages);
 		scroll->setWidgetResizable(true);
 		scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -424,11 +527,12 @@ BeautyDock::BeautyDock()
 		pageScrolls.push_back(scroll);
 		pages->addWidget(scroll);
 	}
-	pageScrolls[0]->setWidget(buildEnhance());
-	pageScrolls[1]->setWidget(buildEffects());
-	pageScrolls[2]->setWidget(buildAtmosphere());
-	pageScrolls[3]->setWidget(buildFilters());
-	pageScrolls[4]->setWidget(buildLight());
+	pageScrolls[PG_PRESETS]->setWidget(buildPresets());
+	pageScrolls[PG_ENHANCE]->setWidget(buildEnhance());
+	pageScrolls[PG_EFFECTS]->setWidget(buildEffects());
+	pageScrolls[PG_ATMO]->setWidget(buildAtmosphere());
+	pageScrolls[PG_FILTERS]->setWidget(buildFilters());
+	pageScrolls[PG_LIGHT]->setWidget(buildLight());
 	thumbTimer = new QTimer(this);
 	thumbTimer->setInterval(5000);
 	QObject::connect(thumbTimer, &QTimer::timeout, this, [this]() {
@@ -502,6 +606,7 @@ BeautyDock::~BeautyDock()
 	for (auto &j : thumbJobs)
 		for (obs_data_t *d : j.presets)
 			obs_data_release(d);
+	obs_data_array_release(myLooks);
 }
 
 QWidget *BeautyDock::buildHeader()
@@ -515,27 +620,51 @@ QWidget *BeautyDock::buildHeader()
 	row->setSpacing(8);
 	auto *title = new QLabel(QStringLiteral("Dewy"), w);
 	title->setStyleSheet("font-size:17px; font-weight:700;");
+	if (char *logo = obs_module_file("brand/dewy-wordmark-dark@2x.png")) {
+		QPixmap pm(QString::fromUtf8(logo));
+		if (!pm.isNull()) {
+			pm = pm.scaledToHeight(68, Qt::SmoothTransformation);
+			pm.setDevicePixelRatio(2.0);
+			title->setPixmap(pm);
+			title->setToolTip(QStringLiteral("Dewy"));
+		}
+		bfree(logo);
+	}
 	row->addWidget(title);
 	row->addStretch(1);
 
-	auto *reset = new IconButton(
-		[](QPainter &p, const QRectF &r, const QColor &c) {
-			p.setRenderHint(QPainter::Antialiasing);
-			p.setPen(QPen(c, 1.8, Qt::SolidLine, Qt::RoundCap));
-			QRectF a = r.adjusted(1.5, 1.5, -1.5, -1.5);
-			p.drawArc(a, 100 * 16, 290 * 16);
-			QPointF tip(a.center().x() - a.width() * 0.17, a.top());
-			p.drawLine(tip, tip + QPointF(4.0, -2.8));
-			p.drawLine(tip, tip + QPointF(4.0, 3.0));
-		},
-		QStringLiteral("Reset this tab"), w);
-	reset->onClicked = [this]() { resetCurrentTab(); };
-	row->addWidget(reset);
+	/* Reset: a labelled pill so it reads as a button */
+	QPixmap ico(32, 32);
+	ico.fill(Qt::transparent);
+	{
+		QPainter p(&ico);
+		p.setRenderHint(QPainter::Antialiasing);
+		p.setPen(QPen(QColor(0xee, 0xee, 0xf1), 3.0, Qt::SolidLine, Qt::RoundCap));
+		QRectF a(6, 6, 20, 20);
+		p.drawArc(a, 100 * 16, 290 * 16);
+		QPointF tip(a.center().x() - a.width() * 0.17, a.top());
+		p.drawLine(tip, tip + QPointF(6.5, -4.5));
+		p.drawLine(tip, tip + QPointF(6.5, 4.8));
+	}
+	ico.setDevicePixelRatio(2.0);
+	resetBtn = new QPushButton(QIcon(ico), QStringLiteral("Reset"), w);
+	resetBtn->setIconSize(QSize(16, 16));
+	resetBtn->setCursor(Qt::PointingHandCursor);
+	resetBtn->setToolTip(QStringLiteral("Reset this tab"));
+	resetBtn->setStyleSheet(
+		"QPushButton { color:#eeeef1; background:#26262b; border:1px solid #3a3a42; border-radius:13px;"
+		" padding:4px 12px 4px 9px; font-size:12px; font-weight:600; }"
+		"QPushButton:hover { background:#303036; border-color:#55555e; }"
+		"QPushButton:pressed { background:#3a3a42; }");
+	QObject::connect(resetBtn, &QPushButton::clicked, this, [this]() { resetCurrentTab(); });
+	locators["reset"] = resetBtn;
+	row->addWidget(resetBtn);
 
 	enableToggle = new Toggle(w);
 	enableToggle->setToolTip(QStringLiteral("Turn this tab on / off"));
 	enableToggle->onToggled = [this](bool on) {
-		setBool(tabSwitchKey(), on);
+		if (const char *k = tabSwitchKey())
+			setBool(k, on);
 		updateTabSwitch();
 	};
 	row->addWidget(enableToggle);
@@ -550,6 +679,7 @@ QWidget *BeautyDock::buildHeader()
 	v->addWidget(sourceBox);
 
 	topTabs = new TopTabs(w);
+	topTabs->addTab(QStringLiteral("Presets"), {Base::Palette});
 	topTabs->addTab(QStringLiteral("Enhance"), {Base::Wand});
 	topTabs->addTab(QStringLiteral("Effects"), {Base::Smiley});
 	topTabs->addTab(QStringLiteral("Atmosphere"), {Base::Ambience});
@@ -560,6 +690,10 @@ QWidget *BeautyDock::buildHeader()
 		updateTabSwitch();
 		refreshThumbs();
 	};
+	for (int i = 0; i < PG_COUNT; i++)
+		locators[std::string("tab:") + PAGE_NAMES[i]] = topTabs->button(i);
+	locators["tabs:next"] = topTabs->chevron(true);
+	locators["tabs:prev"] = topTabs->chevron(false);
 	v->addWidget(topTabs);
 
 	auto *sep = new QFrame(w);
@@ -611,10 +745,11 @@ QWidget *BeautyDock::sliderSection(const Opt &o)
 	refreshers.push_back([this, row, key]() { row->setValue((int)getInt(key)); });
 	v->addWidget(row);
 	focusers[key] = [this, w]() {
-		showTab(0);
+		showTab(PG_ENHANCE);
 		showEnhanceSub(0);
-		reveal(0, w);
+		reveal(PG_ENHANCE, w);
 	};
+	locators[std::string("slider:") + key] = row->slider;
 	return w;
 }
 
@@ -666,14 +801,17 @@ QWidget *BeautyDock::categorySection(const FeatureGroup &c)
 		buttons[state->selected]->setModified(val != o.def);
 	};
 	refreshers.push_back([apply, buttons]() { apply(buttons); });
-	for (size_t i = 0; i < c.opts.size(); i++)
+	for (size_t i = 0; i < c.opts.size(); i++) {
 		focusers[c.opts[i].key] = [this, w, state, i, apply, buttons]() {
-			showTab(0);
+			showTab(PG_ENHANCE);
 			showEnhanceSub(0);
 			state->selected = (int)i;
 			apply(buttons);
-			reveal(0, w);
+			reveal(PG_ENHANCE, w);
 		};
+		locators[std::string("opt:") + c.opts[i].key] = buttons[i];
+		locators[std::string("slider:") + c.opts[i].key] = row->slider;
+	}
 
 	v->addWidget(chips);
 	v->addWidget(row);
@@ -962,10 +1100,11 @@ QWidget *BeautyDock::buildMakeup()
 		flow->addWidget(t);
 		lookTiles.push_back(t);
 		focusers["look:" + l.name.toStdString()] = [this, t]() {
-			showTab(0);
+			showTab(PG_ENHANCE);
 			showEnhanceSub(1);
-			reveal(0, t);
+			reveal(PG_ENHANCE, t);
 		};
+		locators["look:" + l.name.toStdString()] = t;
 		if (l.custom) {
 			t->onClicked = [this]() {
 				customPanel->setVisible(!customPanel->isVisible());
@@ -1041,6 +1180,293 @@ static QWidget *subTabRow(QWidget *parent, const std::vector<QString> &names, st
 	return row;
 }
 
+/* ---------------- Presets: built-in full looks + your own ---------------- */
+
+QWidget *BeautyDock::buildPresets()
+{
+	auto *w = new QWidget();
+	auto *v = new QVBoxLayout(w);
+	v->setContentsMargins(14, 12, 14, 16);
+	v->setSpacing(10);
+
+	/* your presets */
+	auto *head = new QHBoxLayout();
+	auto *t = new QLabel(QStringLiteral("My presets"), w);
+	t->setProperty("role", "title");
+	head->addWidget(t);
+	head->addStretch(1);
+	saveBtn = new QPushButton(QStringLiteral("＋  Save current look"), w);
+	saveBtn->setCursor(Qt::PointingHandCursor);
+	saveBtn->setToolTip(QStringLiteral("Save every tab's settings as a preset"));
+	saveBtn->setStyleSheet(
+		"QPushButton { color:#1e0e16; background:#ff96b8; border:none; border-radius:13px; padding:5px 12px;"
+		" font-size:12px; font-weight:700; }"
+		"QPushButton:hover { background:#ffaac6; } QPushButton:pressed { background:#f584a8; }");
+	QObject::connect(saveBtn, &QPushButton::clicked, this, [this]() { saveCurrentLook(); });
+	locators["save_look"] = saveBtn;
+	head->addWidget(saveBtn);
+	v->addLayout(head);
+
+	myGrid = new PresetGrid(w);
+	myGrid->onPicked = [this](const QString &n) {
+		for (size_t i = 0; myLooks && i < obs_data_array_count(myLooks); i++) {
+			obs_data_t *e = obs_data_array_item(myLooks, i);
+			if (n == QString::fromUtf8(obs_data_get_string(e, "name"))) {
+				obs_data_t *st = obs_data_get_obj(e, "settings");
+				applyLook(st, false, QStringLiteral("u:") + n);
+				obs_data_release(st);
+			}
+			obs_data_release(e);
+		}
+	};
+	myGrid->onContext = [this](const QString &n, const QPoint &g) {
+		QMenu menu(this);
+		QAction *ren = menu.addAction(QStringLiteral("Rename…"));
+		QAction *del = menu.addAction(QStringLiteral("Delete"));
+		QAction *got = menu.exec(g);
+		if (!got || !myLooks)
+			return;
+		for (size_t i = 0; i < obs_data_array_count(myLooks); i++) {
+			obs_data_t *e = obs_data_array_item(myLooks, i);
+			bool hit = n == QString::fromUtf8(obs_data_get_string(e, "name"));
+			if (hit && got == del) {
+				obs_data_array_erase(myLooks, i);
+			} else if (hit && got == ren) {
+				bool ok = false;
+				QString nn = QInputDialog::getText(this, QStringLiteral("Rename preset"), QStringLiteral("Name"),
+								   QLineEdit::Normal, n, &ok)
+						     .trimmed();
+				if (ok && !nn.isEmpty())
+					obs_data_set_string(e, "name", nn.toUtf8().constData());
+			}
+			obs_data_release(e);
+			if (hit)
+				break;
+		}
+		storeMyLooks();
+		rebuildMyLooks();
+	};
+	refreshers.push_back([this]() {
+		QString cur = QString::fromStdString(getString("dewy_look"));
+		myGrid->setSelected(cur.startsWith("u:") ? cur.mid(2) : QString());
+		for (PresetGrid *g : lookGrids)
+			g->setSelected(cur.startsWith("b:") ? cur.mid(2) : QString());
+	});
+	v->addWidget(myGrid);
+	loadMyLooks();
+	rebuildMyLooks();
+
+	/* built-in looks, by category */
+	obs_data_t *root = presets_looks_root();
+	std::vector<obs_data_t *> cats = arrayItems(root, "categories");
+	std::vector<QString> chipNames;
+	for (obs_data_t *c : cats)
+		chipNames.push_back(QString::fromUtf8(obs_data_get_string(c, "name")));
+	auto titles = std::make_shared<std::vector<QWidget *>>();
+	v->addWidget(chipRow(chipNames, [this, titles](int idx) {
+		if (idx < (int)titles->size())
+			reveal(PG_PRESETS, (*titles)[idx]);
+	}));
+	for (obs_data_t *c : cats) {
+		auto *ct = new QLabel(QString::fromUtf8(obs_data_get_string(c, "name")), w);
+		ct->setProperty("role", "title");
+		ct->setContentsMargins(0, 6, 0, 0);
+		titles->push_back(ct);
+		v->addWidget(ct);
+		auto *grid = new PresetGrid(w);
+		std::vector<obs_data_t *> items = arrayItems(c, "looks");
+		std::vector<PresetGrid::Item> gi;
+		for (obs_data_t *d : items)
+			gi.push_back({QString::fromUtf8(obs_data_get_string(d, "name")), QImage()});
+		grid->setItems(gi);
+		for (auto &it : gi) {
+			std::string id = "preset:" + it.name.toStdString();
+			focusers[id] = [this, grid, n = it.name]() {
+				showTab(PG_PRESETS);
+				reveal(PG_PRESETS, grid->tileNamed(n));
+			};
+			locators[id] = grid->tileNamed(it.name);
+		}
+		grid->onPicked = [this, root](const QString &n) {
+			obs_data_t *look = presets_find_in(root, "looks", n.toUtf8().constData());
+			if (!look)
+				return;
+			obs_data_t *st = obs_data_get_obj(look, "settings");
+			applyLook(st, true, QStringLiteral("b:") + n);
+			obs_data_release(st);
+			obs_data_release(look);
+		};
+		lookGrids.push_back(grid);
+		thumbJobs.push_back({grid, PG_PRESETS, items, lookThumb});
+		v->addWidget(grid);
+		obs_data_release(c);
+	}
+	v->addStretch(1);
+	return w;
+}
+
+/* Everything a look touches goes back to its default first, so a preset is the whole look. */
+void BeautyDock::applyLook(obs_data_t *st, bool builtin, const QString &tag)
+{
+	if (!filter)
+		return;
+	obs_data_t *d = obs_data_create();
+	obs_data_t *defs = obs_get_source_defaults(FILTER_ID);
+	for (obs_data_item_t *it = obs_data_first(defs); it; obs_data_item_next(&it)) {
+		const char *k = obs_data_item_get_name(it);
+		if (!look_key(k))
+			continue;
+		switch (obs_data_item_gettype(it)) {
+		case OBS_DATA_NUMBER:
+			if (obs_data_item_numtype(it) == OBS_DATA_NUM_INT)
+				obs_data_set_int(d, k, obs_data_item_get_default_int(it));
+			else
+				obs_data_set_double(d, k, obs_data_item_get_default_double(it));
+			break;
+		case OBS_DATA_BOOLEAN:
+			obs_data_set_bool(d, k, obs_data_item_get_default_bool(it));
+			break;
+		case OBS_DATA_STRING:
+			obs_data_set_string(d, k, obs_data_item_get_default_string(it));
+			break;
+		default:
+			break;
+		}
+	}
+	obs_data_release(defs);
+	for (const char *k : {"effect_preset", "atmo_preset", "motion_preset", "filter_preset", "light_preset", "fl_lut"})
+		obs_data_set_string(d, k, "");
+	obs_data_set_string(d, "makeup_preset", "None");
+	if (st)
+		obs_data_apply(d, st);
+	if (builtin) /* let the filter apply the makeup look's colours */
+		obs_data_set_string(d, "makeup_applied", "");
+	obs_data_set_string(d, "dewy_look", tag.toUtf8().constData());
+	obs_source_update(filter, d);
+	obs_data_release(d);
+	/* applying a makeup look resets its intensities; restore the preset's own */
+	if (st && (obs_data_has_user_value(st, "makeup_amt") || obs_data_has_user_value(st, "filter_amt"))) {
+		obs_data_t *amt = obs_data_create();
+		for (const char *k : {"makeup_amt", "filter_amt"})
+			if (obs_data_has_user_value(st, k))
+				obs_data_set_int(amt, k, obs_data_get_int(st, k));
+		obs_source_update(filter, amt);
+		obs_data_release(amt);
+	}
+}
+
+void BeautyDock::saveCurrentLook()
+{
+	if (!filter)
+		return;
+	/* saved straight away with the next free name; right-click renames */
+	auto taken = [this](const QString &n) {
+		for (size_t i = 0; myLooks && i < obs_data_array_count(myLooks); i++) {
+			obs_data_t *x = obs_data_array_item(myLooks, i);
+			bool same = n == QString::fromUtf8(obs_data_get_string(x, "name"));
+			obs_data_release(x);
+			if (same)
+				return true;
+		}
+		return false;
+	};
+	int n = 1;
+	while (taken(QStringLiteral("My look %1").arg(n)))
+		n++;
+	QString name = QStringLiteral("My look %1").arg(n);
+	obs_data_t *cur = obs_source_get_settings(filter);
+	obs_data_t *st = obs_data_create();
+	obs_data_apply(st, cur);
+	obs_data_release(cur);
+	for (const char *k : {"all_skin", "show_landmarks", "sync_tracking", "debug_view", "dewy_look"})
+		obs_data_erase(st, k);
+	obs_data_t *e = obs_data_create();
+	obs_data_set_string(e, "name", name.toUtf8().constData());
+	obs_data_set_obj(e, "settings", st);
+	obs_data_release(st);
+	if (!myLooks)
+		myLooks = obs_data_array_create();
+	bool replaced = false;
+	for (size_t i = 0; i < obs_data_array_count(myLooks) && !replaced; i++) {
+		obs_data_t *x = obs_data_array_item(myLooks, i);
+		if (name == QString::fromUtf8(obs_data_get_string(x, "name"))) {
+			obs_data_array_erase(myLooks, i);
+			obs_data_array_insert(myLooks, i, e);
+			replaced = true;
+		}
+		obs_data_release(x);
+	}
+	if (!replaced)
+		obs_data_array_push_back(myLooks, e);
+	obs_data_release(e);
+	storeMyLooks();
+	rebuildMyLooks();
+	setString("dewy_look", (QStringLiteral("u:") + name).toUtf8().constData());
+}
+
+void BeautyDock::loadMyLooks()
+{
+	obs_data_array_release(myLooks);
+	myLooks = nullptr;
+	char *path = obs_module_config_path("my-presets.json");
+	obs_data_t *d = path ? obs_data_create_from_json_file(path) : nullptr;
+	bfree(path);
+	if (d)
+		myLooks = obs_data_get_array(d, "presets");
+	obs_data_release(d);
+	if (!myLooks)
+		myLooks = obs_data_array_create();
+}
+
+void BeautyDock::storeMyLooks()
+{
+	char *dir = obs_module_config_path("");
+	if (dir) {
+		os_mkdirs(dir);
+		bfree(dir);
+	}
+	char *path = obs_module_config_path("my-presets.json");
+	if (!path)
+		return;
+	obs_data_t *d = obs_data_create();
+	obs_data_set_array(d, "presets", myLooks);
+	obs_data_save_json_safe(d, path, "tmp", "bak");
+	obs_data_release(d);
+	bfree(path);
+}
+
+void BeautyDock::rebuildMyLooks()
+{
+	std::vector<PresetGrid::Item> gi;
+	for (size_t i = 0; myLooks && i < obs_data_array_count(myLooks); i++) {
+		obs_data_t *e = obs_data_array_item(myLooks, i);
+		gi.push_back({QString::fromUtf8(obs_data_get_string(e, "name")), QImage()});
+		obs_data_release(e);
+	}
+	myGrid->setItems(gi);
+	myGrid->setVisible(!gi.empty());
+	for (auto it = locators.begin(); it != locators.end();)
+		it = it->first.rfind("mypreset:", 0) == 0 ? locators.erase(it) : std::next(it);
+	for (auto &it : gi)
+		locators["mypreset:" + it.name.toStdString()] = myGrid->tileNamed(it.name);
+	refreshMyThumbs();
+	refresh();
+}
+
+void BeautyDock::refreshMyThumbs()
+{
+	if (!filter || !myGrid || !myLooks || !obs_data_array_count(myLooks))
+		return;
+	FaceCrop crop = captureFaceCrop(filter, 128, 2.1f);
+	std::vector<QImage> imgs;
+	for (size_t i = 0; i < obs_data_array_count(myLooks); i++) {
+		obs_data_t *e = obs_data_array_item(myLooks, i);
+		imgs.push_back(lookThumb(crop, e));
+		obs_data_release(e);
+	}
+	myGrid->setThumbs(imgs);
+}
+
 QWidget *BeautyDock::buildEnhance()
 {
 	auto *page = new QWidget();
@@ -1050,6 +1476,8 @@ QWidget *BeautyDock::buildEnhance()
 	enhanceStack = new QStackedWidget(page);
 	v->addWidget(subTabRow(page, {"Appearance", "Makeup"}, subTabs,
 			       [this](int i) { enhanceStack->setCurrentIndex(i); }));
+	locators["sub:appearance"] = subTabs[0];
+	locators["sub:makeup"] = subTabs[1];
 	enhanceStack->addWidget(buildAppearance());
 	enhanceStack->addWidget(buildMakeup());
 	fitStackToCurrent(enhanceStack);
@@ -1125,10 +1553,14 @@ QWidget *BeautyDock::presetSections(int page, obs_data_t *root, const char *item
 			gi.push_back({QString::fromUtf8(obs_data_get_string(d, "name")), QImage()});
 		grid->setItems(gi);
 		for (auto &it : gi)
-			focusers[std::string(settingKey) + ":" + it.name.toStdString()] = [this, page, grid, n = it.name]() {
+		{
+			std::string id = std::string(settingKey) + ":" + it.name.toStdString();
+			focusers[id] = [this, page, grid, n = it.name]() {
 				showTab(page);
 				reveal(page, grid->tileNamed(n));
 			};
+			locators[id] = grid->tileNamed(it.name);
+		}
 		grid->onPicked = [this, settingKey](const QString &n) { setString(settingKey, n.toUtf8().constData()); };
 		refreshers.push_back([this, grid, settingKey]() {
 			grid->setSelected(QString::fromStdString(getString(settingKey)));
@@ -1158,12 +1590,16 @@ PresetGrid *BeautyDock::simpleGrid(int page, obs_data_t *root, const char *items
 	grid->setItems(gi);
 	int sub = strcmp(settingKey, "motion_preset") == 0 ? 1 : 0;
 	for (auto &it : gi)
-		focusers[std::string(settingKey) + ":" + it.name.toStdString()] = [this, page, sub, grid, n = it.name]() {
+	{
+		std::string id = std::string(settingKey) + ":" + it.name.toStdString();
+		focusers[id] = [this, page, sub, grid, n = it.name]() {
 			showTab(page);
-			if (page == 2)
+			if (page == PG_ATMO)
 				showAtmoSub(sub);
 			reveal(page, grid->tileNamed(n));
 		};
+		locators[id] = grid->tileNamed(it.name);
+	}
 	grid->onPicked = [this, settingKey](const QString &n) {
 		setString(settingKey, n == "None" ? "" : n.toUtf8().constData());
 	};
@@ -1177,7 +1613,7 @@ PresetGrid *BeautyDock::simpleGrid(int page, obs_data_t *root, const char *items
 
 QWidget *BeautyDock::buildEffects()
 {
-	return presetSections(1, presets_effects_root(), "effects", "effect_preset", effectThumb, nullptr, nullptr, 0);
+	return presetSections(PG_EFFECTS, presets_effects_root(), "effects", "effect_preset", effectThumb, nullptr, nullptr, 0);
 }
 
 QWidget *BeautyDock::buildAtmosphere()
@@ -1189,6 +1625,8 @@ QWidget *BeautyDock::buildAtmosphere()
 	auto *stack = new QStackedWidget(page);
 	atmoStack = stack;
 	v->addWidget(subTabRow(page, {"Ambience", "Motion"}, atmoTabs, [stack](int i) { stack->setCurrentIndex(i); }));
+	locators["sub:ambience"] = atmoTabs[0];
+	locators["sub:motion"] = atmoTabs[1];
 	struct Sub {
 		const char *items, *key, *amtKey;
 		int def;
@@ -1199,7 +1637,7 @@ QWidget *BeautyDock::buildAtmosphere()
 		auto *w = new QWidget(stack);
 		auto *wl = new QVBoxLayout(w);
 		wl->setContentsMargins(14, 12, 14, 16);
-		wl->addWidget(simpleGrid(2, presets_atmosphere_root(), sub.items, sub.key, sub.gen,
+		wl->addWidget(simpleGrid(PG_ATMO, presets_atmosphere_root(), sub.items, sub.key, sub.gen,
 					 intensityCard("Intensity", sub.amtKey, sub.def)));
 		wl->addStretch(1);
 		stack->addWidget(w);
@@ -1212,7 +1650,7 @@ QWidget *BeautyDock::buildAtmosphere()
 
 QWidget *BeautyDock::buildFilters()
 {
-	return presetSections(3, presets_filters_root(), "filters", "filter_preset", filterThumb, "Filter",
+	return presetSections(PG_FILTERS, presets_filters_root(), "filters", "filter_preset", filterThumb, "Filter",
 			      "filter_preset_amt", 80);
 }
 
@@ -1222,7 +1660,7 @@ QWidget *BeautyDock::buildLight()
 	auto *v = new QVBoxLayout(page);
 	v->setContentsMargins(14, 12, 14, 16);
 	v->setSpacing(14);
-	v->addWidget(simpleGrid(4, presets_lights_root(), "lights", "light_preset", lightThumb, nullptr));
+	v->addWidget(simpleGrid(PG_LIGHT, presets_lights_root(), "lights", "light_preset", lightThumb, nullptr));
 	v->addWidget(intensityCard("Intensity", "light_amt", 60));
 	v->addStretch(1);
 	return page;
@@ -1238,9 +1676,11 @@ void BeautyDock::refreshThumbs()
 		any |= j.page == page;
 	if (!any)
 		return;
-	if (page == 4)
+	if (page == PG_PRESETS)
+		refreshMyThumbs();
+	if (page == PG_LIGHT)
 		beauty_filter_request_person_preview(filter);
-	FaceCrop crop = captureFaceCrop(filter, 128, page == 4 ? 3.4f : 2.1f); /* light: upper body */
+	FaceCrop crop = captureFaceCrop(filter, 128, page == PG_LIGHT ? 3.4f : 2.1f); /* light: upper body */
 	for (auto &j : thumbJobs) {
 		if (j.page != page)
 			continue;
@@ -1366,7 +1806,15 @@ void BeautyDock::resetCurrentTab()
 		return;
 	obs_data_t *d = obs_data_create();
 	int page = pages->currentIndex();
-	if (page == 0 && enhanceStack->currentIndex() == 0) {
+	if (page == PG_PRESETS) { /* everything back to defaults */
+		obs_data_release(d);
+		obs_data_t *empty = obs_data_create();
+		obs_data_set_string(empty, "dewy_look", "");
+		applyLook(empty, true, QString());
+		obs_data_release(empty);
+		return;
+	}
+	if (page == PG_ENHANCE && enhanceStack->currentIndex() == 0) {
 		obs_data_set_int(d, SMOOTH.key, SMOOTH.def);
 		obs_data_set_int(d, FOUNDATION.key, FOUNDATION.def);
 		obs_data_set_int(d, SKIN_TONE.key, SKIN_TONE.def);
@@ -1376,18 +1824,18 @@ void BeautyDock::resetCurrentTab()
 				obs_data_set_int(d, o.key, o.def);
 		for (const Opt &o : tailSliders())
 			obs_data_set_int(d, o.key, o.def);
-	} else if (page == 0) {
+	} else if (page == PG_ENHANCE) {
 		obs_data_set_string(d, "makeup_preset", "None");
 		obs_data_set_int(d, "filter_amt", 70);
 		obs_data_set_int(d, "makeup_amt", 70);
-	} else if (page == 1) {
+	} else if (page == PG_EFFECTS) {
 		obs_data_set_string(d, "effect_preset", "");
-	} else if (page == 2) {
+	} else if (page == PG_ATMO) {
 		obs_data_set_string(d, "atmo_preset", "");
 		obs_data_set_string(d, "motion_preset", "");
-	} else if (page == 3) {
+	} else if (page == PG_FILTERS) {
 		obs_data_set_string(d, "filter_preset", "");
-	} else if (page == 4) {
+	} else if (page == PG_LIGHT) {
 		obs_data_set_string(d, "light_preset", "");
 	}
 	obs_source_update(filter, d);
@@ -1484,13 +1932,12 @@ void BeautyDock::snapshotIfRequested()
 		d->show();
 		QApplication::processEvents();
 		d->bindToSelection();
-		const char *names[] = {"enhance", "effects", "atmosphere", "filters", "light"};
-		for (int i = 0; i < 5; i++) {
+		for (int i = 0; i < PG_COUNT; i++) {
 			d->showTab(i);
 			QApplication::processEvents();
-			d->grab().save(out + QString("/tab-%1.png").arg(names[i]));
+			d->grab().save(out + QString("/tab-%1.png").arg(PAGE_NAMES[i]));
 		}
-		d->showTab(0);
+		d->showTab(PG_ENHANCE);
 		d->showEnhanceSub(1);
 		d->setCustomOpen(true);
 		QApplication::processEvents();
@@ -1513,11 +1960,10 @@ static QPointer<BeautyDock> g_dock;
 
 static void vendor_show(obs_data_t *req, obs_data_t *res, void *)
 {
-	static const char *tabs[] = {"enhance", "effects", "atmosphere", "filters", "light"};
 	std::string tab = obs_data_get_string(req, "tab"), sub = obs_data_get_string(req, "sub");
 	int ti = -1;
-	for (int i = 0; i < 5; i++)
-		if (tab == tabs[i])
+	for (int i = 0; i < PG_COUNT; i++)
+		if (tab == PAGE_NAMES[i])
 			ti = i;
 	obs_data_set_bool(res, "ok", ti >= 0 && g_dock);
 	if (ti < 0 || !g_dock)
@@ -1538,13 +1984,90 @@ static void vendor_show(obs_data_t *req, obs_data_t *res, void *)
 static void vendor_focus(obs_data_t *req, obs_data_t *res, void *)
 {
 	std::string target = obs_data_get_string(req, "target");
-	bool ok = g_dock && g_dock->hasFocusTarget(target); /* the map is fixed after construction */
-	obs_data_set_bool(res, "ok", ok);
-	if (ok)
-		QMetaObject::invokeMethod(g_dock, [target]() {
-			if (g_dock)
+	bool ok = false;
+	if (g_dock)
+		QMetaObject::invokeMethod(g_dock, [target, &ok]() {
+			if (g_dock && g_dock->hasFocusTarget(target)) {
 				g_dock->focusTarget(target);
+				ok = true;
+			}
+		}, Qt::BlockingQueuedConnection);
+	obs_data_set_bool(res, "ok", ok);
+}
+
+/* Where a control is on screen (global coordinates, logical points): {x, y, w, h} and, for
+ * sliders, the knob {kx, ky}. Targets: anything "focus" takes, "slider:<key>", "opt:<key>",
+ * "tab:<page>", "sub:<subtab>", "reset", "save_look". */
+static void vendor_locate(obs_data_t *req, obs_data_t *res, void *)
+{
+	std::string target = obs_data_get_string(req, "target");
+	bool ok = false, hasKnob = false;
+	QRect r;
+	QPointF knob;
+	double shown = 0;
+	if (g_dock)
+		QMetaObject::invokeMethod(g_dock, [&]() { ok = g_dock && g_dock->locate(target, r, knob, hasKnob, shown); },
+					  Qt::BlockingQueuedConnection);
+	obs_data_set_bool(res, "ok", ok);
+	if (!ok)
+		return;
+	obs_data_set_int(res, "x", r.x());
+	obs_data_set_int(res, "y", r.y());
+	obs_data_set_int(res, "w", r.width());
+	obs_data_set_int(res, "h", r.height());
+	obs_data_set_double(res, "shown", shown);
+	if (hasKnob) {
+		obs_data_set_double(res, "kx", knob.x());
+		obs_data_set_double(res, "ky", knob.y());
+	}
+}
+
+/* {target: "preset:<name>" | "mypreset:<name>"}: apply a full look, like clicking its tile */
+static void vendor_apply(obs_data_t *req, obs_data_t *res, void *)
+{
+	std::string target = obs_data_get_string(req, "target");
+	bool ok = false;
+	if (g_dock)
+		QMetaObject::invokeMethod(g_dock, [&]() { ok = g_dock && g_dock->applyNamed(target); },
+					  Qt::BlockingQueuedConnection);
+	obs_data_set_bool(res, "ok", ok);
+}
+
+/* the Reset button: the current tab (Presets: everything) */
+static void vendor_reset(obs_data_t *, obs_data_t *res, void *)
+{
+	if (g_dock)
+		QMetaObject::invokeMethod(g_dock, []() {
+			if (g_dock)
+				g_dock->resetTab();
 		}, Qt::QueuedConnection);
+	obs_data_set_bool(res, "ok", g_dock != nullptr);
+}
+
+/* {dir: 1 | -1}: the tab strip's arrows */
+static void vendor_tabs_scroll(obs_data_t *req, obs_data_t *res, void *)
+{
+	bool right = obs_data_get_int(req, "dir") >= 0;
+	if (g_dock)
+		QMetaObject::invokeMethod(g_dock, [right]() {
+			if (g_dock)
+				g_dock->scrollTabs(right);
+		}, Qt::QueuedConnection);
+	obs_data_set_bool(res, "ok", g_dock != nullptr);
+}
+
+/* save the current look as "My look N", like the Save button */
+static void vendor_save(obs_data_t *, obs_data_t *res, void *)
+{
+	bool ok = false;
+	if (g_dock)
+		QMetaObject::invokeMethod(g_dock, [&]() {
+			if (g_dock) {
+				g_dock->saveLook();
+				ok = true;
+			}
+		}, Qt::BlockingQueuedConnection);
+	obs_data_set_bool(res, "ok", ok);
 }
 
 extern "C" void beauty_dock_register(void)
@@ -1558,5 +2081,10 @@ extern "C" void beauty_dock_register(void)
 	if (obs_websocket_vendor v = obs_websocket_register_vendor("dewy")) {
 		obs_websocket_vendor_register_request(v, "show", vendor_show, nullptr);
 		obs_websocket_vendor_register_request(v, "focus", vendor_focus, nullptr);
+		obs_websocket_vendor_register_request(v, "locate", vendor_locate, nullptr);
+		obs_websocket_vendor_register_request(v, "apply", vendor_apply, nullptr);
+		obs_websocket_vendor_register_request(v, "save", vendor_save, nullptr);
+		obs_websocket_vendor_register_request(v, "tabs_scroll", vendor_tabs_scroll, nullptr);
+		obs_websocket_vendor_register_request(v, "reset", vendor_reset, nullptr);
 	}
 }

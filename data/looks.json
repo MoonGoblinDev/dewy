@@ -1,0 +1,85 @@
+{
+  "categories": [
+    {
+      "name": "Everyday",
+      "looks": [
+        {"name": "Dewy", "settings": {"smooth": 55, "foundation": 45, "redness": 40, "eyelight": 30, "shadows": 30,
+          "makeup_preset": "Soft Glow", "makeup_amt": 60, "filter_preset": "Milk", "filter_preset_amt": 50,
+          "light_preset": "Soft Box", "light_amt": 35}},
+        {"name": "Natural", "settings": {"smooth": 40, "foundation": 30, "redness": 30, "eyelight": 20, "shadows": 20}},
+        {"name": "Fresh Face", "settings": {"smooth": 50, "foundation": 40, "redness": 45, "eyelight": 30,
+          "makeup_preset": "Natural", "makeup_amt": 55, "filter_preset": "Fresh", "filter_preset_amt": 60}},
+        {"name": "No-Makeup", "settings": {"smooth": 45, "foundation": 50, "redness": 50, "shadows": 40, "eyelight": 20,
+          "makeup_preset": "Natural", "makeup_amt": 40}},
+        {"name": "Soft Focus", "settings": {"smooth": 75, "foundation": 50, "redness": 40, "shadows": 35,
+          "filter_preset": "Soft", "filter_preset_amt": 70}},
+        {"name": "Bright", "settings": {"smooth": 50, "foundation": 45, "skin_tone": 20, "eyelight": 35, "teeth": 30,
+          "filter_preset": "Bright", "filter_preset_amt": 60}}
+      ]
+    },
+    {
+      "name": "Glam",
+      "looks": [
+        {"name": "Soft Glam", "settings": {"smooth": 65, "foundation": 55, "redness": 50, "eyelight": 35, "face_slim": 20,
+          "makeup_preset": "Rose", "makeup_amt": 80, "light_preset": "Butterfly", "light_amt": 45}},
+        {"name": "K-Beauty", "settings": {"smooth": 70, "foundation": 55, "skin_tone": 25, "redness": 45, "eye_size": 25,
+          "face_slim": 25, "face_v": 20, "makeup_preset": "K-Beauty", "makeup_amt": 75, "filter_preset": "Milk",
+          "filter_preset_amt": 60}},
+        {"name": "Doll", "settings": {"smooth": 75, "foundation": 60, "skin_tone": 20, "eye_size": 40, "eye_pupil": 20,
+          "face_small": 25, "makeup_preset": "Doll", "makeup_amt": 80, "filter_preset": "Candy", "filter_preset_amt": 50}},
+        {"name": "Berry", "settings": {"smooth": 60, "foundation": 50, "redness": 40, "face_slim": 15,
+          "makeup_preset": "Berry", "makeup_amt": 80, "filter_preset": "Mood", "filter_preset_amt": 45}},
+        {"name": "Bronze", "settings": {"smooth": 60, "foundation": 50, "skin_tone": -15, "cheekbone": 20,
+          "makeup_preset": "Bronze Glam", "makeup_amt": 80, "light_preset": "Golden Hour", "light_amt": 45}},
+        {"name": "Smoky Night", "settings": {"smooth": 60, "foundation": 50, "redness": 40, "eye_size": 15,
+          "makeup_preset": "Smoky", "makeup_amt": 85, "filter_preset": "Cinema", "filter_preset_amt": 55,
+          "light_preset": "Spotlight", "light_amt": 40}}
+      ]
+    },
+    {
+      "name": "Studio",
+      "looks": [
+        {"name": "Soft Box", "settings": {"smooth": 50, "foundation": 45, "redness": 40, "eyelight": 30,
+          "light_preset": "Soft Box", "light_amt": 70}},
+        {"name": "Beauty Dish", "settings": {"smooth": 60, "foundation": 50, "redness": 45, "eyelight": 35,
+          "makeup_preset": "Soft Glow", "makeup_amt": 55, "light_preset": "Butterfly", "light_amt": 70}},
+        {"name": "Rembrandt", "settings": {"smooth": 45, "foundation": 40, "contrast": 25,
+          "light_preset": "Rembrandt", "light_amt": 75, "filter_preset": "Cinema", "filter_preset_amt": 40}},
+        {"name": "Golden Hour", "settings": {"smooth": 50, "foundation": 45, "redness": 30,
+          "light_preset": "Golden Hour", "light_amt": 70, "filter_preset": "Honey", "filter_preset_amt": 55}},
+        {"name": "Rim Light", "settings": {"smooth": 50, "foundation": 40, "contrast": 20,
+          "light_preset": "Rim Glow", "light_amt": 75}}
+      ]
+    },
+    {
+      "name": "Mood",
+      "looks": [
+        {"name": "Neon Night", "settings": {"smooth": 55, "foundation": 45, "redness": 40,
+          "light_preset": "Neon", "light_amt": 70, "filter_preset": "Neon Night", "filter_preset_amt": 60,
+          "atmo_preset": "Night Fog", "atmo_amt": 50}},
+        {"name": "Film", "settings": {"smooth": 45, "foundation": 40,
+          "makeup_preset": "Vintage Film", "makeup_amt": 70, "filter_preset": "Portra", "filter_preset_amt": 75}},
+        {"name": "Dreamy", "settings": {"smooth": 70, "foundation": 50, "redness": 40, "eyelight": 30,
+          "filter_preset": "Soft", "filter_preset_amt": 60, "atmo_preset": "Dreamy", "atmo_amt": 60}},
+        {"name": "Cozy", "settings": {"smooth": 55, "foundation": 45, "redness": 35,
+          "light_preset": "Golden Hour", "light_amt": 55, "filter_preset": "Honey", "filter_preset_amt": 60,
+          "atmo_preset": "Fireflies", "atmo_amt": 55}},
+        {"name": "Blue Hour", "settings": {"smooth": 55, "foundation": 45,
+          "light_preset": "Moonlight", "light_amt": 60, "filter_preset": "Blue Hour", "filter_preset_amt": 65}},
+        {"name": "Noir", "settings": {"smooth": 45, "contrast": 30,
+          "light_preset": "Spotlight", "light_amt": 60, "filter_preset": "Noir", "filter_preset_amt": 90}}
+      ]
+    },
+    {
+      "name": "Men",
+      "looks": [
+        {"name": "Clean", "settings": {"smooth": 35, "foundation": 35, "redness": 45, "shadows": 35,
+          "makeup_preset": "Clean (men)", "makeup_amt": 70}},
+        {"name": "Sharp", "settings": {"smooth": 30, "foundation": 30, "redness": 40, "contrast": 30, "jawbone": 20,
+          "makeup_preset": "Sharp (men)", "makeup_amt": 70, "light_preset": "Rembrandt", "light_amt": 45}},
+        {"name": "Warm Tan", "settings": {"smooth": 35, "foundation": 35, "skin_tone": -15, "redness": 35,
+          "makeup_preset": "Warm Tan (men)", "makeup_amt": 70, "filter_preset": "Gold 200", "filter_preset_amt": 50}}
+      ]
+    }
+  ]
+}

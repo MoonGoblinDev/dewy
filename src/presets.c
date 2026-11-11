@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stddef.h>
 
-static obs_data_t *g_filters, *g_lights, *g_atmo, *g_effects;
+static obs_data_t *g_filters, *g_lights, *g_atmo, *g_effects, *g_looks;
 
 static obs_data_t *load(const char *file)
 {
@@ -23,6 +23,7 @@ void presets_load(void)
 	g_lights = load("lights.json");
 	g_atmo = load("atmosphere.json");
 	g_effects = load("effects.json");
+	g_looks = load("looks.json");
 }
 
 void presets_free(void)
@@ -31,7 +32,8 @@ void presets_free(void)
 	obs_data_release(g_lights);
 	obs_data_release(g_atmo);
 	obs_data_release(g_effects);
-	g_filters = g_lights = g_atmo = g_effects = NULL;
+	obs_data_release(g_looks);
+	g_filters = g_lights = g_atmo = g_effects = g_looks = NULL;
 }
 
 obs_data_t *presets_filters_root(void)
@@ -50,9 +52,13 @@ obs_data_t *presets_effects_root(void)
 {
 	return g_effects;
 }
+obs_data_t *presets_looks_root(void)
+{
+	return g_looks;
+}
 
 /* Finds {"name": name} in root[list] or, with categories, root.categories[*][list]. */
-static obs_data_t *find_in(obs_data_t *root, const char *list, const char *name)
+obs_data_t *presets_find_in(obs_data_t *root, const char *list, const char *name)
 {
 	if (!root || !name || !*name)
 		return NULL;
@@ -184,7 +190,7 @@ void presets_parse_effect(obs_data_t *d, struct fx_params *fx)
 
 bool presets_filter(const char *name, struct grade_params *out)
 {
-	obs_data_t *d = find_in(g_filters, "filters", name);
+	obs_data_t *d = presets_find_in(g_filters, "filters", name);
 	if (!d)
 		return false;
 	presets_parse_grade(d, out);
@@ -194,7 +200,7 @@ bool presets_filter(const char *name, struct grade_params *out)
 
 bool presets_light(const char *name, struct light_params *out)
 {
-	obs_data_t *d = find_in(g_lights, "lights", name);
+	obs_data_t *d = presets_find_in(g_lights, "lights", name);
 	if (!d)
 		return false;
 	presets_parse_light(d, out);
@@ -208,7 +214,7 @@ static const char *motion_names[] = {"none", "shake", "pulse", "rgb", "drift", "
 
 bool presets_atmo(const char *name, struct atmo_params *out)
 {
-	obs_data_t *d = find_in(g_atmo, "ambience", name);
+	obs_data_t *d = presets_find_in(g_atmo, "ambience", name);
 	if (!d)
 		return false;
 	memset(out, 0, sizeof(*out));
@@ -229,7 +235,7 @@ bool presets_atmo(const char *name, struct atmo_params *out)
 
 bool presets_motion(const char *name, struct motion_params *out)
 {
-	obs_data_t *d = find_in(g_atmo, "motion", name);
+	obs_data_t *d = presets_find_in(g_atmo, "motion", name);
 	if (!d)
 		return false;
 	out->style = index_of(obs_data_get_string(d, "style"), motion_names, 7);
@@ -241,7 +247,7 @@ bool presets_motion(const char *name, struct motion_params *out)
 
 bool presets_effect(const char *name, struct fx_params *out)
 {
-	obs_data_t *d = find_in(g_effects, "effects", name);
+	obs_data_t *d = presets_find_in(g_effects, "effects", name);
 	if (!d)
 		return false;
 	presets_parse_effect(d, out);

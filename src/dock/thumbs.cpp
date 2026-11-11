@@ -529,4 +529,42 @@ QImage motionThumb(const FaceCrop &c, obs_data_t *preset)
 	return out;
 }
 
+QImage lookThumb(const FaceCrop &c, obs_data_t *look)
+{
+	obs_data_t *s = obs_data_get_obj(look, "settings");
+	if (!s)
+		return c.img.copy();
+	FaceCrop cur = c;
+	/* skin: a soft-focus hint proportional to Smooth */
+	long long sm = obs_data_get_int(s, "smooth");
+	if (sm > 0) {
+		QImage soft = cur.img.scaled(cur.img.width() / 6, cur.img.height() / 6, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+				      .scaled(cur.img.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		QPainter p(&cur.img);
+		p.setOpacity(0.28 * sm / 100.0);
+		p.drawImage(0, 0, soft);
+	}
+	struct Layer {
+		const char *key;
+		obs_data_t *root;
+		const char *list;
+		QImage (*gen)(const FaceCrop &, obs_data_t *);
+	} layers[] = {
+		{"light_preset", presets_lights_root(), "lights", lightThumb},
+		{"filter_preset", presets_filters_root(), "filters", filterThumb},
+		{"atmo_preset", presets_atmosphere_root(), "ambience", atmoThumb},
+		{"effect_preset", presets_effects_root(), "effects", effectThumb},
+	};
+	for (const Layer &l : layers) {
+		const char *name = obs_data_get_string(s, l.key);
+		obs_data_t *p = (name && *name) ? presets_find_in(l.root, l.list, name) : nullptr;
+		if (p) {
+			cur.img = l.gen(cur, p);
+			obs_data_release(p);
+		}
+	}
+	obs_data_release(s);
+	return cur.img;
+}
+
 } // namespace beauty

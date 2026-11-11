@@ -1,5 +1,9 @@
 #include "widgets.hpp"
 
+#include <QtCore/QVariantAnimation>
+#include <QtWidgets/QScrollBar>
+#include <algorithm>
+
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
@@ -959,6 +963,8 @@ void ThumbTile::mousePressEvent(QMouseEvent *e)
 {
 	if (e->button() == Qt::LeftButton && onClicked)
 		onClicked();
+	else if (e->button() == Qt::RightButton && onContext)
+		onContext(e->globalPosition().toPoint());
 }
 
 /* ============================== preset grid ============================== */
@@ -983,6 +989,10 @@ void PresetGrid::setItems(const std::vector<Item> &list)
 		t->onClicked = [this, n]() {
 			if (onPicked)
 				onPicked(n);
+		};
+		t->onContext = [this, n](const QPoint &g) {
+			if (onContext)
+				onContext(n, g);
 		};
 		tiles.push_back(t);
 	}
@@ -1049,13 +1059,11 @@ TopTabs::TopTabs(QWidget *parent) : QWidget(parent)
 				p.drawLine(QPointF(cx + d * s * 0.5, cy), QPointF(cx - d * s * 0.5, cy + s));
 			},
 			right ? QStringLiteral("More") : QStringLiteral("Back"), this);
-		b->onClicked = [this, right]() {
-			auto *bar = scroll->horizontalScrollBar();
-			bar->setValue(bar->value() + (right ? 140 : -140));
-		};
+		b->onClicked = [this, right]() { scrollStep(right); };
 		return b;
 	};
 	auto *left = chevron(false);
+	leftBtn = left;
 	scroll = new QScrollArea(this);
 	scroll->setFrameShape(QFrame::NoFrame);
 	scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -1069,6 +1077,7 @@ TopTabs::TopTabs(QWidget *parent) : QWidget(parent)
 	row->addStretch(1);
 	scroll->setWidget(strip);
 	auto *right = chevron(true);
+	rightBtn = right;
 	outer->addWidget(left);
 	outer->addWidget(scroll, 1);
 	outer->addWidget(right);
@@ -1106,8 +1115,37 @@ void TopTabs::setCurrent(int i)
 	cur = i;
 	for (size_t k = 0; k < buttons.size(); k++)
 		buttons[k]->setChecked((int)k == i);
-	if (i >= 0 && i < (int)buttons.size())
-		scroll->ensureWidgetVisible(buttons[i], 30, 0);
+	if (i < 0 || i >= (int)buttons.size())
+		return;
+	/* bring the tab into view, animated */
+	QWidget *b = buttons[i];
+	auto *bar = scroll->horizontalScrollBar();
+	int x = b->mapTo(strip, QPoint(0, 0)).x(), view = scroll->viewport()->width(), target = bar->value();
+	if (x - 30 < target)
+		target = x - 30;
+	else if (x + b->width() + 30 > target + view)
+		target = x + b->width() + 30 - view;
+	animateTo(target);
+}
+
+void TopTabs::scrollStep(bool right)
+{
+	animateTo(scroll->horizontalScrollBar()->value() + (right ? 140 : -140));
+}
+
+void TopTabs::animateTo(int x)
+{
+	auto *bar = scroll->horizontalScrollBar();
+	x = std::clamp(x, bar->minimum(), bar->maximum());
+	if (x == bar->value())
+		return;
+	auto *anim = new QVariantAnimation(this);
+	anim->setStartValue(bar->value());
+	anim->setEndValue(x);
+	anim->setDuration(320);
+	anim->setEasingCurve(QEasingCurve::InOutCubic);
+	QObject::connect(anim, &QVariantAnimation::valueChanged, bar, [bar](const QVariant &v) { bar->setValue(v.toInt()); });
+	anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 /* ============================== flow layout ============================== */
