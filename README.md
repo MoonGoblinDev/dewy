@@ -1,51 +1,106 @@
 # Dewy
 
-Real-time beauty for OBS: a live-streaming apps–style beauty filter that runs natively inside OBS
-(no virtual camera).
-It covers skin smoothing, foundation, dark-circle and smile-line removal, teeth whitening,
-bright eyes and clarity, plus landmark-driven face, eye, nose, mouth and brow reshaping.
+**Real-time beauty for OBS.** A face-aware beauty filter that runs natively inside OBS, as a
+regular video filter, with no virtual camera. Skin smoothing, tone, face reshaping, makeup,
+stickers, ambience, colour filters and virtual studio lighting, all controlled from one dock.
 
-- Face tracking:
-  - **macOS:** Apple Vision (76-point landmarks + person segmentation, Neural Engine).
-  - **Windows:** ONNX Runtime + DirectML (any DX12 GPU, CPU fallback) running Google MediaPipe
-    Face Landmarker v2 (478 points), MediaPipe selfie multiclass segmentation and OpenCV YuNet
-    for (re)detection. See `data/models/NOTICE.md`.
-  - Both backends feed the same portable core (`src/tracker/tracker-core.cpp`): smoothing,
-    frame sync, skin sampling, mask smoothing.
-- Skin: a learned segmenter (MediaPipe selfie multiclass on ONNX Runtime - Core ML on macOS,
-  DirectML on Windows) labels face skin, body skin, hair, clothes and background every frame.
-  The mask is snapped to the image's edges on the GPU (joint-bilateral upsampling); exact
-  landmark outlines protect eyes, lips and brow hair. Retouching is frequency separation:
-  base (shading + colour) / blemish band / fine grain. Smooth removes the blemish band and keeps
-  the grain; Shadows fills the base layer.
-- Skin colour is edited as pigment, not painted. In optical density (−log linear RGB) skin is
-  melanin + hemoglobin + shading; the two pigment directions are calibrated on the user's own
-  skin every 2 s (2-D ICA, clamped to physical priors). Skin tone changes melanin, Foundation
-  evens melanin/hemoglobin blotches within the colour plane plus a little exposure, Redness
-  removes excess hemoglobin. Makeup (lipstick, eyeshadow, blush, contour, highlight) is
-  deposited the same way - colour against the surface's own, brightness multiplicatively - so
-  lips keep their creases and colour variation and lids keep their texture. Shading (light, shadows, the 3-D form) is never written, so
-  shadow depth stays at 0.98–1.02 of the original (see
-  [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md)).
-- Everything else runs as GPU shaders in OBS's render pipeline (`data/effects/`).
-- Research notes and the streaming-app slider → technique mapping: [docs/RESEARCH.md](docs/RESEARCH.md)
+<p align="center">
+  <img src="docs/media/demo.webp" alt="Dewy demo: original on the left, Dewy on the right, stepping through smoothing, foundation, skin tone, reshaping, makeup, studio light and a colour filter" width="900">
+</p>
+<p align="center"><a href="docs/media/demo.mp4">▶ Watch the demo video (MP4, 30 s)</a></p>
 
-## Build & install (macOS, against the installed OBS.app)
+![OBS with the Dewy dock: a streamer in the preview, the Enhance tab showing Smooth, Foundation, Skin tone and Redness sliders](docs/media/obs-dewy.png)
+
+## Why Dewy
+
+Most beauty filters paint over the skin: they blur it, then blend a skin colour on top. That's what
+makes faces look flat and plastic, because the paint also covers the light and shadow that give a
+face its shape.
+
+Dewy edits skin the way skin actually works. In optical density, every skin pixel is
+**melanin + hemoglobin + shading**, and Dewy calibrates the first two on *your* skin and *your*
+camera every two seconds. Skin tone changes melanin. Foundation evens out melanin and hemoglobin
+blotches. Redness removes excess hemoglobin. Makeup is deposited as a pigment layer. The
+shading (your lighting, your shadows, the 3-D form of your face) is never touched. Measured, it
+keeps 98–102 % of the original shadow depth; Dewy's own earlier paint-over version kept only 59–67 %.
+The details are in [research/pigment/FINDINGS.md](research/pigment/FINDINGS.md).
+
+## Features
+
+| Tab | What it does |
+|---|---|
+| **Enhance → Appearance** | Smooth (keeps pores and grain), Foundation, Skin tone (lighter / deeper), Redness, Shadows (dark circles), smile lines, teeth whitening, bright eyes, clarity, plus 27 reshape sliders for face, eyes, nose, mouth and brows |
+| **Enhance → Makeup** | 15 looks, or build your own: lipstick and gloss, blush (3 placements), eyeshadow, eyeliner, contour, highlight, brow tint, colour grade and `.cube` LUTs |
+| **Effects** | 23 face-tracked stickers and distortions (ears, glasses, crowns, freckles, …) |
+| **Atmosphere** | 13 GPU particle ambiences and 6 camera-motion effects |
+| **Filters** | 26 colour grades, baked to 3D LUTs at runtime |
+| **Light** | 9 whole-body virtual lights (key, rim, fill, background dim) that follow your real silhouette |
+
+- Every tab has its own on/off switch, and the dock's thumbnails are rendered from your own face.
+- Landmarks are tracked frame-synchronised, so makeup and stickers stay stuck to your face.
+- Skin edits use a learned segmenter (face skin, body skin, hair, clothes), so the neck and hands match
+  the face, and walls, doors and shirts are never treated as skin.
+
+## Install
+
+There are no prebuilt releases yet. Build from source (below), then restart OBS.
+
+1. The **Dewy** dock opens the first time (later: **Docks → Dewy**).
+2. Pick your camera in the dock and press **Add Dewy to this source**, or add the **Dewy** filter to
+   any video source from its Filters window.
+
+**Requirements:** OBS Studio 33 and macOS on Apple Silicon (tested). The Windows build is
+written but **has not been compiled or tested yet**, so expect fixes to be needed.
+
+## Performance
+
+Measured on an M4 Pro MacBook Pro with a 1080p30 camera in a 1080p60 OBS canvas. The extra cost
+of the filter barely depends on which features are on:
+
+| | Filter off | Dewy on (every tab active) |
+|---|---|---|
+| OBS render time per frame | 5.4 ms | 6.0–6.2 ms |
+| OBS CPU | baseline | about +15 % of one core |
+| GPU | baseline | about +7–9 % |
+| Skipped frames | 0 | 0 |
+
+Face tracking runs on Apple Vision, and segmentation runs mostly on the Neural Engine (Core ML via
+ONNX Runtime), so little of the work competes with a game for the GPU.
+
+## How it works
+
+- **Face tracking.** On macOS, Apple Vision provides 76 landmarks with seeded tracking. The ONNX
+  backend (Windows, or optionally macOS) runs MediaPipe Face Landmarker v2 (478 points) with
+  OpenCV YuNet for re-detection. Both feed one portable core (`src/tracker/tracker-core.cpp`):
+  One-Euro smoothing, frame history with interpolation, frame sync, and repeated-frame detection.
+- **Segmentation.** MediaPipe's selfie multiclass model runs about 15 times a second. Its mask is
+  snapped to the frame's real edges on the GPU with joint-bilateral upsampling.
+- **Skin.** Frequency separation (base / blemish band / fine grain) handles smoothing. Colour
+  edits (tone, foundation, redness, makeup) happen in optical density on the calibrated
+  melanin and hemoglobin directions. See [research/pigment/](research/pigment/).
+- **Everything else** is GPU shaders in OBS's own render pipeline (`data/effects/`): face warp,
+  makeup, LUTs, particles and relighting.
+
+[docs/RESEARCH.md](docs/RESEARCH.md) maps each control to the technique behind it.
+
+## Build from source
+
+### macOS (Apple Silicon)
+
+Needs Xcode command-line tools, CMake 3.24+ and OBS Studio 33 installed in `/Applications`.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_OSX_ARCHITECTURES=arm64
-cmake --build build --target install-plugin   # copies into ~/Library/Application Support/obs-studio/plugins
+cmake --build build --target install-plugin   # installs into ~/Library/Application Support/obs-studio/plugins
 ```
 
-Restart OBS. The **Dewy** dock opens the first time (later: Docks → Dewy). Pick your camera in the dock and press **Add Dewy to this source**, or add the **Dewy** filter from the Filters window.
+The first configure downloads the OBS 33.0.0 headers, SIMDe, OBS's Qt 6.11 headers, ONNX Runtime
+and the models into `.deps/` and `data/models/`. The plugin links against the frameworks inside
+OBS.app.
 
-The first configure downloads the OBS 33.0.0 headers, SIMDe and OBS's Qt 6.11 headers (obs-deps) into `.deps/`. The dock links against the Qt frameworks inside OBS.app and needs no moc (no `Q_OBJECT`).
+### Windows x64 (untested)
 
-Dev aid: create `~/Library/Application Support/obs-studio/plugin_config/dewy/snapshot/` and restart OBS; the dock renders every tab into PNGs there.
-
-## Build & install (Windows x64)
-
-Needs Visual Studio 2022+ (C++ workload) and CMake 3.24+:
+Needs Visual Studio 2022+ with the C++ workload, and CMake 3.24+.
 
 ```bat
 cmake -S . -B build -A x64
@@ -53,20 +108,15 @@ cmake --build build --config Release
 cpack --config build/CPackConfig.cmake -C Release -B dist
 ```
 
-The first configure downloads the OBS 33.0.0 release (its DLLs are turned into import libraries
-with `dumpbin`/`lib`), OBS's Qt 6.11 package, ONNX Runtime DirectML 1.24.4, DirectML 1.15.4 and the
-models. Unzip `dist/dewy-<version>-windows-x64.zip` into your OBS folder
-(`C:\Program Files\obs-studio`) so its `obs-plugins` and `data` folders merge, then restart OBS.
+Unzip `dist/dewy-<version>-windows-x64.zip` into your OBS folder (`C:\Program Files\obs-studio`) so
+that its `obs-plugins` and `data` folders merge. ONNX Runtime with DirectML ships renamed as
+`dewy-onnxruntime.dll` and is loaded by full path, so it can't clash with another plugin's copy.
 
-ONNX Runtime ships renamed (`dewy-onnxruntime.dll`) and is loaded by full path, so it can't
-clash with another plugin's `onnxruntime.dll`. GitHub Actions (`.github/workflows/build.yml`)
-builds both platforms.
+To try the ONNX tracking backend on macOS: `cmake -S . -B build-onnx -DBEAUTY_TRACKER=onnx`.
 
-To try the ONNX backend on macOS: `cmake -S . -B build-onnx -DBEAUTY_TRACKER=onnx`.
+## Development
 
-## Dev loop
-
-`tools/obsctl.py` drives OBS through obs-websocket (reads the password from OBS's config):
+`tools/obsctl.py` drives OBS through obs-websocket. It reads the password from OBS's own config.
 
 ```sh
 python3 tools/obsctl.py set "Video Capture Device" smooth=80 eye_size=40
@@ -74,45 +124,54 @@ python3 tools/obsctl.py reload "Video Capture Device"     # after editing .effec
 python3 tools/obsctl.py shot "Video Capture Device" out.png 1280
 ```
 
-Shader edits only need `install-plugin` + `reload` (effects are compiled from source, bypassing libobs's per-path effect cache). C/ObjC and `presets.json` changes need an OBS restart.
+- Shader edits only need `install-plugin` followed by `reload`, because effects are compiled from
+  source and bypass libobs's effect cache.
+- C, Objective-C and preset JSON changes need an OBS restart.
+- To render every dock tab to PNG, create
+  `~/Library/Application Support/obs-studio/plugin_config/dewy/snapshot/` and restart OBS.
 
-## Adding content
+### Adding content
 
-- **Filter:** add an entry to `data/filters.json` (keys: exposure, contrast, curve, saturation, vibrance,
-  warmth, tint, hue, fade, rolloff, gamma_r/g/b, shadows + shadows_amt, highlights + highlights_amt,
-  mono, mono_tint).
-- **Sticker effect:** draw an SVG in `art/stickers/`, render it to `data/stickers/<name>.png`, and add an
-  effect to `data/effects.json` with sprites anchored to `eyes / eye_l / eye_r / nose / mouth / chin /
-  forehead / head_top / cheek_l / cheek_r` (offsets and widths in inter-ocular-distance units; optional
-  `anim`: bob, pulse, spin, sway, twinkle; `blend`: normal, add, multiply). Distortions use a `shape`
-  object with reshape-slider keys.
-- **Light / ambience:** `data/lights.json` (az/el in degrees, key/rim colours, fill, bg_dim) and
-  `data/atmosphere.json`.
+- **Filters:** add an entry to `data/filters.json` (exposure, contrast, curve, saturation, vibrance,
+  warmth, tint, hue, fade, rolloff, per-channel gamma, shadows / highlights, mono).
+- **Stickers:** draw an SVG in `art/stickers/`, render it to `data/stickers/<name>.png`, and add an
+  effect to `data/effects.json`. Sprites anchor to `eyes`, `eye_l`, `eye_r`, `nose`, `mouth`, `chin`,
+  `forehead`, `head_top`, `cheek_l` or `cheek_r`, with offsets and widths in eye-distance units, an
+  optional `anim` (bob, pulse, spin, sway, twinkle) and `blend` (normal, add, multiply).
+- **Lights and ambiences:** `data/lights.json` and `data/atmosphere.json`.
 
-Preset files are read at startup, so restart OBS after editing them.
+### Project layout
 
-## Tracking tests
-
-`tests/jitter.c` and `tests/lag.c` feed a still photo (with simulated sensor noise, and then a
-pan) through the tracker and report landmark jitter and motion lag in 1080p pixels:
-
-```sh
-clang -O2 -fobjc-arc -I src -framework Foundation -framework Vision -framework CoreVideo \
-  -framework CoreGraphics -framework ImageIO -o /tmp/jitter tests/jitter.c src/face-tracker-vision.m
-/tmp/jitter face.png
+```
+src/beauty-filter.c        the OBS filter: passes, uniforms, tracking hand-off
+src/tracker/               face tracking, segmentation, pigment calibration
+src/dock/                  the Qt dock (no moc)
+data/effects/              GPU shaders
+data/*.json, data/makeup/  presets
+research/pigment/          the pigment-model prototype and its findings
+tests/                     tracking jitter / lag harnesses (need updating for the current tracker)
 ```
 
-## Status
+## Roadmap
 
-- [x] Appearance tab: all 11 streaming-app controls (34 sliders)
-- [x] Makeup tab: 15 looks (`data/makeup/presets.json`) with Filter + Makeup intensities; customisable lips/gloss, blush (3 placements), eyeshadow, eyeliner, contour, highlight, brow tint; colour grade + `.cube` LUT
-- [x] Effects: 23 landmark stickers / distortions (`data/effects.json`, art in `art/stickers/*.svg` → `data/stickers/*.png`)
-- [x] Atmosphere: 13 GPU particle ambiences + 6 motion effects (`data/atmosphere.json`, `data/effects/post.effect`)
-- [x] Filters: 26 colour grades baked to 3D LUTs at runtime (`data/filters.json`, `src/grade.c`)
-- [x] Light: 9 whole-body virtual lights: Apple Vision person segmentation gives the real silhouette
-      (normals from the blurred mask, face ellipsoid blended in, rim along the outline, true background dim)
-- [x] Per-tab on/off switch (header toggle follows the current tab: `enhance_on`, `effects_on`, `atmo_on`,
-      `filters_on`, `light_on`)
-- [x] Dock thumbnails rendered from your own face (CPU mirror of the shaders, `src/dock/thumbs.cpp`)
-- [x] Windows (ONNX Runtime + DirectML backend), verified on macOS via `-DBEAUTY_TRACKER=onnx`
-- [ ] Multiple faces, Linux
+- Prebuilt releases for macOS
+- Compile and test the Windows build
+- Validate the pigment model across a wide range of skin tones
+- Multiple faces, Linux
+
+## Credits
+
+- [OBS Studio](https://obsproject.com) (GPL-2.0)
+- [ONNX Runtime](https://onnxruntime.ai) (MIT)
+- Google MediaPipe Face Landmarker and selfie segmentation models (Apache-2.0)
+- OpenCV YuNet (MIT)
+
+Model sources and licenses are listed in [data/models/NOTICE.md](data/models/NOTICE.md). The pigment
+model follows Tsumura et al., *Image-based skin color and texture analysis/synthesis by extracting
+hemoglobin and melanin information in the skin* (SIGGRAPH 2003).
+
+Dewy is an independent project, not affiliated with streaming-app or OBS.
+
+## License
+
+GPL-2.0-or-later, the same as OBS Studio. See [LICENSE](LICENSE).

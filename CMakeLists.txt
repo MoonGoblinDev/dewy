@@ -206,7 +206,7 @@ if(APPLE)
   set_target_properties(dewy PROPERTIES
     BUNDLE TRUE BUNDLE_EXTENSION plugin PREFIX ""
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"
-    MACOSX_BUNDLE_GUI_IDENTIFIER "id.tunelab.dewy"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.moongoblindev.dewy"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
   set(OBS_USER_PLUGINS "$ENV{HOME}/Library/Application Support/obs-studio/plugins")
