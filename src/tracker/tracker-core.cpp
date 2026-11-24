@@ -23,6 +23,7 @@
 #include "backend.hpp"
 #include "segmenter.hpp"
 #include "pigment-calib.hpp"
+#include "tracker-util.hpp"
 #include "face-tracker.h"
 
 #ifndef M_PI
@@ -50,6 +51,7 @@ struct Euro {
 };
 struct EuroCfg {
 	float min_cutoff, beta;
+	float d_cutoff = 1.0f; /* how quickly the speed estimate follows */
 };
 
 float euro_alpha(float cutoff, float dt)
@@ -61,7 +63,7 @@ float euro_alpha(float cutoff, float dt)
 float euro_step(Euro &s, EuroCfg c, float x, float dt)
 {
 	float dx = (x - s.x) / dt;
-	s.dx += euro_alpha(1.0f, dt) * (dx - s.dx);
+	s.dx += euro_alpha(c.d_cutoff, dt) * (dx - s.dx);
 	float cutoff = c.min_cutoff + c.beta * std::fabs(s.dx);
 	s.x += euro_alpha(cutoff, dt) * (x - s.x);
 	return s.x;
@@ -72,6 +74,32 @@ const EuroCfg CFG_CENTER = {1.5f, 0.20f};
 const EuroCfg CFG_ANGLE = {1.0f, 1.0f};
 const EuroCfg CFG_SCALE = {0.8f, 0.05f};
 const EuroCfg CFG_SHAPE = {0.6f, 0.35f};
+/* Eyelids and lips: a blink closes the lid in ~100 ms and makeup sits right on these edges, so they
+ * must follow at once. A quick speed estimate (8 Hz) and a steep beta open the filter as soon as
+ * they move; at rest they are still held at ~1.5 Hz. */
+const EuroCfg CFG_FEATURE = {1.5f, 6.0f, 8.0f};
+
+/* MediaPipe mesh indices of the eyelid outlines, the rings around them and the lip outlines. */
+bool mesh_feature_point(int i)
+{
+	static bool table[FT_MESH_POINTS];
+	static bool init = [] {
+		static const int ids[] = {
+			/* eyes: lid outlines, then the ring outside each */
+			33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246, 263, 249, 390, 373,
+			374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466, 130, 25, 110, 24, 23, 22, 26, 112,
+			243, 190, 56, 28, 27, 29, 30, 247, 359, 255, 339, 254, 253, 252, 256, 341, 463, 414, 286, 258,
+			257, 259, 260, 467,
+			/* lips: outer and inner outlines */
+			61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185, 78,
+			95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191};
+		for (int id : ids)
+			table[id] = true;
+		return true;
+	}();
+	(void)init;
+	return i >= 0 && i < FT_MESH_POINTS && table[i];
+}
 
 ft_point region_centroid(const ft_face &f, int r)
 {
@@ -165,6 +193,7 @@ struct face_tracker {
 	std::atomic<bool> backend_ready{false};
 	Worker lm, seg;
 	std::atomic<bool> seg_enabled{false};
+	std::atomic<bool> seg_fast{false};
 
 	/* results */
 	std::mutex res_m;
@@ -194,6 +223,8 @@ struct face_tracker {
 	bool pigment_calibrated = false;
 	uint64_t pigment_next_ns = 0;
 	uint64_t seg_last_ns = 0;
+	double wait_sum = 0, wait_max = 0; /* DEWY_PROFILE */
+	int wait_n = 0, wait_late = 0;
 
 	void smooth(ft_face &f, uint64_t ts);
 	void run_landmarks();
@@ -203,7 +234,7 @@ struct face_tracker {
 void face_tracker::smooth(ft_face &f, uint64_t ts)
 {
 	ft_point c = all_centroid(f);
-	ft_point e1 = region_centroid(f, FT_LEFT_EYE), e2 = region_centroid(f, FT_RIGHT_EYE);
+	ft_point e1 = ft_eye_anchor(&f, 0), e2 = ft_eye_anchor(&f, 1);
 	if (e1.x > e2.x)
 		std::swap(e1, e2);
 	float scale = std::fmax(std::hypot(e2.x - e1.x, e2.y - e1.y), 1.0f);
@@ -239,9 +270,16 @@ void face_tracker::smooth(ft_face &f, uint64_t ts)
 		c.y = euro_step(e_cy, CFG_CENTER, c.y, dt);
 		ang = euro_step(e_ang, CFG_ANGLE, ang, dt);
 		scale = euro_step(e_scale, CFG_SCALE, scale, dt);
+		bool feature[FT_MAX_POINTS] = {};
+		for (int r : {FT_LEFT_EYE, FT_RIGHT_EYE, FT_OUTER_LIPS, FT_INNER_LIPS})
+			for (int i = 0; i < f.region_count[r]; i++)
+				feature[f.region_start[r] + i] = true;
+		for (int i = 0; i < f.region_count[FT_MESH]; i++)
+			feature[f.region_start[FT_MESH] + i] = mesh_feature_point(i);
 		for (int i = 0; i < f.num_points; i++) {
-			sx[i] = euro_step(e_shape[i * 2], CFG_SHAPE, sx[i], dt);
-			sy[i] = euro_step(e_shape[i * 2 + 1], CFG_SHAPE, sy[i], dt);
+			const EuroCfg &cfg = feature[i] ? CFG_FEATURE : CFG_SHAPE;
+			sx[i] = euro_step(e_shape[i * 2], cfg, sx[i], dt);
+			sy[i] = euro_step(e_shape[i * 2 + 1], cfg, sy[i], dt);
 		}
 		cs = std::cos(ang);
 		sn = std::sin(ang);
@@ -256,7 +294,9 @@ void face_tracker::smooth(ft_face &f, uint64_t ts)
 
 void face_tracker::run_landmarks()
 {
-#if !defined(BEAUTY_TRACKER_VISION)
+#if defined(BEAUTY_TRACKER_COREML)
+	backend = create_coreml_backend(models_dir);
+#elif !defined(BEAUTY_TRACKER_VISION)
 	backend = create_onnx_backend(models_dir);
 #endif
 	backend_ready = true;
@@ -352,9 +392,12 @@ void face_tracker::run_segmentation()
 				mask = m;
 				mask_w = mw;
 				mask_h = mh;
-			} else { /* temporal smoothing against flicker */
-				for (size_t i = 0; i < mask.size(); i++)
-					mask[i] = (uint8_t)((mask[i] + m[i] + 1) / 2);
+			} else { /* against flicker, without trailing: small changes (noise) are averaged, real
+				    * movement (a big change) is taken at once */
+				for (size_t i = 0; i < mask.size(); i++) {
+					int d = (int)m[i] - (int)mask[i];
+					mask[i] = (d > 40 || d < -40) ? m[i] : (uint8_t)((mask[i] + m[i] + 1) / 2);
+				}
 			}
 			mask_serial++;
 		}
@@ -441,9 +484,9 @@ static bool queue_frame(Worker &w, const uint8_t *data, uint32_t linesize, uint3
 extern "C" bool face_tracker_submit_bgra(face_tracker_t *t, const uint8_t *data, uint32_t linesize, uint32_t width,
 					 uint32_t height, uint64_t frame_id, uint64_t timestamp_ns)
 {
-	/* segmentation on its own thread, never blocking landmarks, at most ~15 Hz: the mask is
-	 * smoothed over time anyway and edges are snapped to every frame on the GPU */
-	const uint64_t SEG_INTERVAL_NS = 66000000ULL;
+	/* segmentation on its own thread, never blocking landmarks: ~30 Hz while a light follows the
+	 * body with it, ~15 Hz otherwise; edges are snapped to every frame on the GPU */
+	const uint64_t SEG_INTERVAL_NS = t->seg_fast.load() ? 33000000ULL : 66000000ULL;
 	if (t->seg_enabled.load() && timestamp_ns - t->seg_last_ns >= SEG_INTERVAL_NS &&
 	    queue_frame(t->seg, data, linesize, width, height, frame_id, timestamp_ns))
 		t->seg_last_ns = timestamp_ns;
@@ -452,9 +495,28 @@ extern "C" bool face_tracker_submit_bgra(face_tracker_t *t, const uint8_t *data,
 
 extern "C" bool face_tracker_wait(face_tracker_t *t, uint64_t frame_id, float timeout_ms)
 {
-	std::unique_lock<std::mutex> lk(t->res_m);
-	return t->res_cv.wait_for(lk, std::chrono::microseconds((int64_t)(timeout_ms * 1000.0f)),
-				  [&] { return t->processed_id >= frame_id; });
+	uint64_t t0 = now_ns();
+	bool ok;
+	{
+		std::unique_lock<std::mutex> lk(t->res_m);
+		ok = t->res_cv.wait_for(lk, std::chrono::microseconds((int64_t)(timeout_ms * 1000.0f)),
+					[&] { return t->processed_id >= frame_id; });
+	}
+	/* DEWY_PROFILE=1: how long the render thread waits for each frame's landmarks */
+	static const bool prof = getenv("DEWY_PROFILE") != nullptr;
+	if (prof) {
+		double ms = (double)(now_ns() - t0) / 1e6;
+		t->wait_sum += ms;
+		t->wait_max = std::max(t->wait_max, ms);
+		t->wait_late += ok ? 0 : 1;
+		if (++t->wait_n == 300) {
+			tracker_log("render wait for landmarks: mean %.2f ms, max %.2f ms, %d of 300 frames hit the %.0f ms cap",
+				    t->wait_sum / t->wait_n, t->wait_max, t->wait_late, timeout_ms);
+			t->wait_sum = t->wait_max = 0;
+			t->wait_n = t->wait_late = 0;
+		}
+	}
+	return ok;
 }
 
 static void lerp_face(ft_face *out, const ft_face *a, const ft_face *b, float k)
@@ -497,6 +559,11 @@ extern "C" bool face_tracker_get_at(face_tracker_t *t, uint64_t id, ft_face *out
 	out->frame_id = id;
 	out->present = out->valid && (now_ns() - t->last_seen_ns) < PRESENT_TIMEOUT_NS;
 	return out->valid;
+}
+
+extern "C" void face_tracker_set_segmentation_fast(face_tracker_t *t, bool fast)
+{
+	t->seg_fast = fast;
 }
 
 extern "C" void face_tracker_set_segmentation(face_tracker_t *t, bool enabled)

@@ -41,24 +41,10 @@ enum {
 	REGION_MOUTH_INNER,
 	REGION_UNDER_EYE_L,
 	REGION_UNDER_EYE_R,
-	REGION_FOLD_L,
-	REGION_FOLD_R,
-	REGION_FOREHEAD,
 	REGION_CHEEK_L, /* blush (position depends on blush style) */
 	REGION_CHEEK_R,
 	REGION_SHADOW_L, /* eyeshadow */
 	REGION_SHADOW_R,
-	REGION_HOLLOW_L, /* contour under the cheekbone */
-	REGION_HOLLOW_R,
-	REGION_JAW_L, /* contour along the jaw */
-	REGION_JAW_R,
-	REGION_NOSE_SIDE_L, /* nose contour */
-	REGION_NOSE_SIDE_R,
-	REGION_HL_NOSE, /* highlights */
-	REGION_HL_FOREHEAD,
-	REGION_HL_CHIN,
-	REGION_HL_CHEEK_L,
-	REGION_HL_CHEEK_R,
 	REGION_PERSON_HEAD, /* head incl. hair, for lighting / background dim */
 	REGION_PERSON_BODY, /* shoulders + torso below the chin */
 	REGION_COUNT

@@ -365,16 +365,11 @@ void face_layout_build(struct face_layout *out, const ft_face *face, const struc
 	c.out = out;
 	c.weight = weight;
 
-	/* --- face frame from the eye centres --- */
+	/* --- face frame from the eye anchors (eye corners with the mesh: steady through blinks) --- */
 	v2 e[2];
 	for (int s = 0; s < 2; s++) {
-		enum ft_region r = s ? FT_RIGHT_EYE : FT_LEFT_EYE;
-		v2 acc = {0, 0};
-		for (int i = 0; i < face->region_count[r]; i++) {
-			acc.x += face->pts[face->region_start[r] + i].x * W;
-			acc.y += face->pts[face->region_start[r] + i].y * H;
-		}
-		e[s] = V(acc.x / face->region_count[r], acc.y / face->region_count[r]);
+		ft_point a = ft_eye_anchor(face, s);
+		e[s] = V(a.x * W, a.y * H);
 	}
 	if (e[0].x > e[1].x) {
 		v2 t = e[0];
@@ -536,14 +531,10 @@ void face_layout_build(struct face_layout *out, const ft_face *face, const struc
 		if (brow[s].n)
 			region(&c, REGION_BROW_L + s, brow[s].c, fmaxf(brow[s].x1 - brow[s].x0, 0.3f) * 0.58f, 0.10f,
 			       up);
-		region(&c, REGION_UNDER_EYE_L + s, V(eye[s].c.x + side * 0.02f, eye[s].c.y + eh * 0.5f + 0.15f),
-		       ew * 0.6f, 0.11f, up);
-
-		v2 wing = V(nose_cx + side * nose_w * 0.5f, tip_y - 0.02f);
-		v2 fold_c = V((wing.x + corner[s].x) * 0.5f + side * 0.05f, (wing.y + corner[s].y) * 0.5f);
-		v2 axis = V(corner[s].x - wing.x + side * 0.05f, corner[s].y - wing.y);
-		float len = hypotf(axis.x, axis.y);
-		region(&c, REGION_FOLD_L + s, fold_c, 0.06f, len * 0.6f + 0.05f, axis);
+		/* dark circles: the whole eye surround - lids, inner corner, under-eye down to the tear
+		 * trough - centred below the eye, so it reaches further down than up */
+		region(&c, REGION_UNDER_EYE_L + s, V(eye[s].c.x + side * 0.02f, eye[s].c.y + 0.10f), ew * 0.85f + 0.06f,
+		       0.34f, up);
 
 		/* ---- makeup ---- */
 		switch (blush_style) {
@@ -561,21 +552,6 @@ void face_layout_build(struct face_layout *out, const ft_face *face, const struc
 		}
 		region(&c, REGION_SHADOW_L + s, V(eye[s].c.x + side * 0.04f, eye[s].c.y - eh * 0.5f - 0.06f),
 		       ew * 0.72f, 0.13f, up);
-
-		v2 cheek_top = V(contour_x(&c, s, 0.45f), 0.45f);
-		v2 hollow = V(contour_x(&c, s, 0.75f) * 0.80f, 0.78f);
-		v2 hollow_axis = V(corner[s].x - cheek_top.x, corner[s].y - cheek_top.y);
-		region(&c, REGION_HOLLOW_L + s, hollow, 0.12f, 0.30f, hollow_axis);
-
-		float jy0 = chin_y * 0.62f, jy1 = chin_y * 0.95f;
-		v2 j0 = V(contour_x(&c, s, jy0), jy0), j1 = V(contour_x(&c, s, jy1), jy1);
-		v2 jaw_c = V((j0.x + j1.x) * 0.5f, (j0.y + j1.y) * 0.5f);
-		region(&c, REGION_JAW_L + s, jaw_c, 0.10f, hypotf(j1.x - j0.x, j1.y - j0.y) * 0.6f,
-		       V(j1.x - j0.x, j1.y - j0.y));
-
-		region(&c, REGION_NOSE_SIDE_L + s, V(nose_cx + side * 0.13f, tip_y * 0.48f), 0.045f, tip_y * 0.36f, up);
-		region(&c, REGION_HL_CHEEK_L + s, V(eye[s].c.x + side * 0.16f, eye[s].c.y + 0.36f), 0.26f, 0.12f,
-		       V(-side * 0.35f, 1.0f));
 	}
 	/* rough person silhouette: head with hair, then shoulders / torso */
 	region(&c, REGION_PERSON_HEAD, V(0, (chin_y - 1.6f) * 0.5f), half_w * 1.55f, (chin_y + 1.6f) * 0.5f * 1.1f, up);
@@ -604,12 +580,8 @@ void face_layout_build(struct face_layout *out, const ft_face *face, const struc
 	an[ANCHOR_CHEEK_R][0] = eye[1].c.x + 0.05f;
 	an[ANCHOR_CHEEK_R][1] = eye[1].c.y + 0.55f;
 
-	region(&c, REGION_HL_NOSE, V(nose_cx, tip_y * 0.45f), 0.045f, tip_y * 0.36f, up);
-	region(&c, REGION_HL_FOREHEAD, V(0, -0.55f), 0.24f, 0.18f, up);
-	region(&c, REGION_HL_CHIN, V(chin_x, chin_y - 0.16f), 0.12f, 0.08f, up);
 	region(&c, REGION_LIPS, mc, mw * 0.58f, mh * 0.62f + 0.02f, up);
 	if (inner.n)
 		region(&c, REGION_MOUTH_INNER, V(mc.x, inner.c.y), fmaxf(fmaxf(inner.x1 - inner.x0, mw * 0.85f), 0.1f) * 0.55f,
 		       fmaxf((inner.y1 - inner.y0) * 0.62f, 0.02f), up);
-	region(&c, REGION_FOREHEAD, V(0, -0.75f), 0.8f, 0.3f, up);
 }

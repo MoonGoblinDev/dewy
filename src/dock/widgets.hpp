@@ -26,6 +26,7 @@ inline const QColor text{0xee, 0xee, 0xf1};
 inline const QColor sub{0x8d, 0x8d, 0x96};
 inline const QColor accent{0xfe, 0x2c, 0x55};
 inline const QColor blue{0x2f, 0x7c, 0xf6};
+inline const QColor dewy{0xff, 0x96, 0xb8}; /* brand pink (logo drop) */
 } // namespace theme
 
 /* ---------- icons ---------- */
@@ -135,7 +136,7 @@ private:
 
 class Toggle : public QWidget {
 public:
-	explicit Toggle(QWidget *parent = nullptr);
+	explicit Toggle(QWidget *parent = nullptr, QSize size = {42, 24});
 	void setChecked(bool c)
 	{
 		on = c;
@@ -143,7 +144,7 @@ public:
 	}
 	bool isChecked() const { return on; }
 	std::function<void(bool)> onToggled;
-	QSize sizeHint() const override { return {42, 24}; }
+	QSize sizeHint() const override { return sz; }
 
 protected:
 	void paintEvent(QPaintEvent *) override;
@@ -151,6 +152,22 @@ protected:
 
 private:
 	bool on = false;
+	QSize sz;
+};
+
+/* ---------- power-symbol on/off button (a tab's own on/off) ---------- */
+
+class PowerToggle : public Toggle {
+public:
+	explicit PowerToggle(QWidget *parent = nullptr) : Toggle(parent, QSize(20, 20)) {}
+
+protected:
+	void paintEvent(QPaintEvent *) override;
+	void enterEvent(QEnterEvent *) override { hover = true; update(); }
+	void leaveEvent(QEvent *) override { hover = false; update(); }
+
+private:
+	bool hover = false;
 };
 
 /* ---------- small round icon button (reset, etc.) ---------- */
@@ -337,15 +354,21 @@ public:
 	int current() const { return cur; }
 	QWidget *button(int i) const { return i >= 0 && i < (int)buttons.size() ? (QWidget *)buttons[i] : nullptr; }
 	QWidget *chevron(bool right) const { return right ? rightBtn : leftBtn; }
+	/* a small on/off switch inside tab i's button (the tab's own on/off) */
+	Toggle *addSwitch(int i);
 	void scrollStep(bool right);
 	void animateTo(int x);
 	std::function<void(int)> onChanged;
+
+protected:
+	bool eventFilter(QObject *o, QEvent *e) override;
 
 private:
 	QScrollArea *scroll;
 	QWidget *strip;
 	QHBoxLayout *row;
 	std::vector<QPushButton *> buttons;
+	std::vector<Toggle *> switches; /* per tab, nullptr = none */
 	QWidget *leftBtn = nullptr, *rightBtn = nullptr;
 	int cur = 0;
 };

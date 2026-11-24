@@ -82,11 +82,7 @@ void ort_log(const char *fmt, const std::string &arg)
 {
 	char msg[512];
 	snprintf(msg, sizeof(msg), fmt, arg.c_str());
-#ifdef BEAUTY_HAVE_LIBOBS
-	blog(LOG_INFO, "[dewy] %s", msg);
-#else
-	fprintf(stderr, "[dewy] %s\n", msg);
-#endif
+	tracker_log("%s", msg);
 }
 
 bool ort_load()
@@ -143,15 +139,161 @@ static std::vector<char> read_file(const std::string &path)
 	return std::vector<char>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 }
 
+/* ---- explicit Conv padding ----
+ * Core ML's ML Program converter refuses a Conv without a `pads` attribute ("Required param 'pad'
+ * is missing"), although ONNX defines a missing one as all zeros. MediaPipe's models leave it out on
+ * many convolutions, which pushes Core ML into its older format, where the models split into many
+ * pieces bouncing between Core ML and the CPU. Writing the zeros out changes nothing in the maths.
+ * A minimal protobuf rewrite: ModelProto.graph(7) -> GraphProto.node(1) -> NodeProto.attribute(5). */
+namespace pb {
+static bool varint(const uint8_t *&p, const uint8_t *e, uint64_t &v)
+{
+	v = 0;
+	for (int sh = 0; p < e && sh < 64; sh += 7) {
+		uint8_t b = *p++;
+		v |= (uint64_t)(b & 0x7f) << sh;
+		if (!(b & 0x80))
+			return true;
+	}
+	return false;
+}
+static void put_varint(std::string &o, uint64_t v)
+{
+	while (v >= 0x80) {
+		o.push_back((char)(v | 0x80));
+		v >>= 7;
+	}
+	o.push_back((char)v);
+}
+/* Calls fn(field, wire, start, end) for each field; returns false on malformed input. */
+template<class F> static bool fields(const uint8_t *p, const uint8_t *e, F fn)
+{
+	while (p < e) {
+		const uint8_t *start = p;
+		uint64_t tag, len;
+		if (!varint(p, e, tag))
+			return false;
+		int wire = (int)(tag & 7);
+		if (wire == 0) {
+			if (!varint(p, e, len))
+				return false;
+		} else if (wire == 1) {
+			p += 8;
+		} else if (wire == 5) {
+			p += 4;
+		} else if (wire == 2) {
+			if (!varint(p, e, len) || len > (uint64_t)(e - p))
+				return false;
+			p += len;
+		} else {
+			return false;
+		}
+		if (p > e)
+			return false;
+		fn((int)(tag >> 3), wire, start, p);
+	}
+	return true;
+}
+/* The payload of a length-delimited field [start, end). */
+static void payload(const uint8_t *start, const uint8_t *end, const uint8_t *&ps, const uint8_t *&pe)
+{
+	const uint8_t *p = start;
+	uint64_t tag, len;
+	varint(p, end, tag);
+	varint(p, end, len);
+	ps = p;
+	pe = p + len;
+}
+static void put_len(std::string &o, int field, const std::string &body)
+{
+	put_varint(o, ((uint64_t)field << 3) | 2);
+	put_varint(o, body.size());
+	o += body;
+}
+static std::string fix_node(const uint8_t *s, const uint8_t *e, int &fixed)
+{
+	std::string op;
+	bool has_pads = false;
+	fields(s, e, [&](int f, int w, const uint8_t *a, const uint8_t *b) {
+		const uint8_t *ps, *pe;
+		if (f == 4 && w == 2) {
+			payload(a, b, ps, pe);
+			op.assign((const char *)ps, pe - ps);
+		} else if (f == 5 && w == 2) {
+			payload(a, b, ps, pe);
+			fields(ps, pe, [&](int af, int aw, const uint8_t *x, const uint8_t *y) {
+				const uint8_t *ns, *ne;
+				if (af == 1 && aw == 2) {
+					payload(x, y, ns, ne);
+					if (std::string((const char *)ns, ne - ns) == "pads")
+						has_pads = true;
+				}
+			});
+		}
+	});
+	std::string out((const char *)s, e - s);
+	if ((op == "Conv" || op == "ConvTranspose") && !has_pads) {
+		std::string attr;
+		put_len(attr, 1, "pads");
+		for (int i = 0; i < 4; i++) { /* ints (field 8), unpacked: four zeros */
+			put_varint(attr, 8 << 3);
+			put_varint(attr, 0);
+		}
+		put_varint(attr, 20 << 3); /* type = INTS (7) */
+		put_varint(attr, 7);
+		put_len(out, 5, attr);
+		fixed++;
+	}
+	return out;
+}
+} // namespace pb
+
+static std::vector<char> explicit_conv_pads(const std::vector<char> &in, int &fixed)
+{
+	fixed = 0;
+	const uint8_t *p = (const uint8_t *)in.data(), *e = p + in.size();
+	std::string model;
+	bool ok = pb::fields(p, e, [&](int f, int w, const uint8_t *a, const uint8_t *b) {
+		if (f != 7 || w != 2) { /* everything but the graph: copied as is */
+			model.append((const char *)a, b - a);
+			return;
+		}
+		const uint8_t *gs, *ge;
+		pb::payload(a, b, gs, ge);
+		std::string graph;
+		pb::fields(gs, ge, [&](int gf, int gw, const uint8_t *x, const uint8_t *y) {
+			if (gf != 1 || gw != 2) {
+				graph.append((const char *)x, y - x);
+				return;
+			}
+			const uint8_t *ns, *ne;
+			pb::payload(x, y, ns, ne);
+			pb::put_len(graph, 1, pb::fix_node(ns, ne, fixed));
+		});
+		pb::put_len(model, 7, graph);
+	});
+	if (!ok || !fixed)
+		return in;
+	return std::vector<char>(model.begin(), model.end());
+}
+
 static OrtModelPtr load_model(const std::string &path, bool prefer_accel)
 {
 	std::vector<char> bytes = read_file(path);
+#ifdef __APPLE__
+	if (prefer_accel && !bytes.empty()) {
+		int fixed = 0;
+		bytes = explicit_conv_pads(bytes, fixed);
+		(void)fixed;
+	}
+#endif
 	if (bytes.empty()) {
 		ort_log("missing model %s", path);
 		return nullptr;
 	}
 	auto m = std::make_shared<OrtModel>();
-	auto build = [&](bool accel) {
+	auto build = [&](bool accel, bool mlprogram) {
+		(void)mlprogram;
 		Ort::SessionOptions so;
 		so.SetIntraOpNumThreads(2);
 		/* ORT's workers busy-spin between runs by default: ~85% of a core wasted for a model
@@ -175,8 +317,9 @@ static OrtModelPtr load_model(const std::string &path, bool prefer_accel)
 			}
 #elif defined(__APPLE__)
 			try {
-				/* NeuralNetwork format: MLProgram rejects some MediaPipe depthwise convs */
-				so.AppendExecutionProvider("CoreML", {{"ModelFormat", "NeuralNetwork"}});
+				/* ML Program: takes the (explicitly padded) MediaPipe models nearly whole; the
+				 * older NeuralNetwork format splits them into many Core ML / CPU pieces */
+				so.AppendExecutionProvider("CoreML", {{"ModelFormat", mlprogram ? "MLProgram" : "NeuralNetwork"}});
 				on = true;
 			} catch (const Ort::Exception &) {
 				on = false;
@@ -187,12 +330,21 @@ static OrtModelPtr load_model(const std::string &path, bool prefer_accel)
 		m->accelerated = on;
 	};
 	try {
-		build(prefer_accel);
+		build(prefer_accel, true);
 	} catch (const Ort::Exception &e) {
 		if (!prefer_accel)
 			throw;
+#ifdef __APPLE__
+		try { /* a model ML Program can't compile: the older Core ML format */
+			build(true, false);
+		} catch (const Ort::Exception &e2) {
+			ort_log("accelerated provider failed (%s), using CPU", e2.what());
+			build(false, false);
+		}
+#else
 		ort_log("accelerated provider failed (%s), using CPU", e.what());
-		build(false);
+		build(false, false);
+#endif
 	}
 	Ort::AllocatorWithDefaultOptions alloc;
 	for (size_t i = 0; i < m->session.GetInputCount(); i++)

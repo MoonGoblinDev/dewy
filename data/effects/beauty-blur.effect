@@ -8,6 +8,8 @@ uniform float2 dir;        // (1,0) horizontal, (0,1) vertical
 uniform float step_px;     // tap spacing in source pixels
 uniform float sigma_r;     // bilateral range sigma (RGB distance)
 uniform texture2d guide;   // Refine: the frame (half res) / SkinOD: refined mask / WithAlpha: alpha source
+                          // Paint: the eyeliner styles (face-liner.png)
+uniform float4 liner_sel;  // Paint: which face-liner.png channel is the chosen style (all 0 = none)
 
 sampler_state linearClamp {
 	Filter    = Linear;
@@ -120,6 +122,23 @@ float4 PSWithAlpha(VertData v_in) : TARGET
 	return float4(image.Sample(linearClamp, v_in.uv).rgb, guide.Sample(linearClamp, v_in.uv).a);
 }
 
+
+// Face paint, drawn through the face mesh: face-paint.png with the chosen eyeliner style in B
+float4 PSPaint(VertData v_in) : TARGET
+{
+	float4 p = image.Sample(linearClamp, v_in.uv);
+	float4 l = guide.Sample(linearClamp, v_in.uv);
+	return float4(p.r, p.g, dot(l, liner_sel), p.a);
+}
+
+technique Paint
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSPaint(v_in);
+	}
+}
 
 technique Refine
 {

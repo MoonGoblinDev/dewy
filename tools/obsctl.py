@@ -29,7 +29,13 @@ FILTER_KIND = "obs_beauty_filter"
 
 async def connect():
     cfg = json.load(open(CONFIG))
-    ws = await websockets.connect(f"ws://127.0.0.1:{cfg.get('server_port', 4455)}", max_size=64 * 1024 * 1024)
+    port = cfg.get('server_port', 4455)
+    # OBS listens on every address; IPv6 loopback first, because another app can hold
+    # 127.0.0.1 on the same port (seen with a local app that mimics obs-websocket)
+    try:
+        ws = await websockets.connect(f"ws://[::1]:{port}", max_size=64 * 1024 * 1024)
+    except OSError:
+        ws = await websockets.connect(f"ws://127.0.0.1:{port}", max_size=64 * 1024 * 1024)
     hello = json.loads(await ws.recv())["d"]
     ident = {"rpcVersion": 1}
     if "authentication" in hello:

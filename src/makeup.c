@@ -24,7 +24,9 @@ static const struct mk_slider grade_sliders[] = {
 
 static const char *color_keys[] = {"mk_lip_color", "mk_blush_color", "mk_shadow_color"};
 static const char *amount_keys[] = {"mk_lip_opacity", "mk_lip_gloss", "mk_blush_opacity", "mk_shadow_opacity",
-				    "mk_liner",       "mk_contour",   "mk_highlight",     "mk_brow"};
+				    "mk_contour",     "mk_highlight", "mk_brow"};
+/* eyeliner styles, as named in presets.json (index = mk_liner_style) */
+static const char *liner_styles[] = {"none", "classic", "winged", "cat", "smoky"};
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
 /* OBS colours are 0xAABBGGRR */
@@ -107,7 +109,12 @@ static void apply_preset(obs_data_t *settings, const char *name)
 	set_pct(settings, "mk_lip_gloss", mk, "lip_gloss");
 	set_pct(settings, "mk_blush_opacity", mk, "blush_opacity");
 	set_pct(settings, "mk_shadow_opacity", mk, "shadow_opacity");
-	set_pct(settings, "mk_liner", mk, "liner");
+	const char *ls = mk ? obs_data_get_string(mk, "liner_style") : "";
+	int style = 0;
+	for (int i = 1; i < (int)COUNT(liner_styles); i++)
+		if (strcmp(ls, liner_styles[i]) == 0)
+			style = i;
+	obs_data_set_int(settings, "mk_liner_style", style);
 	set_pct(settings, "mk_contour", mk, "contour");
 	set_pct(settings, "mk_highlight", mk, "highlight");
 	set_pct(settings, "mk_brow", mk, "brow");
@@ -187,7 +194,13 @@ void makeup_add_properties(obs_properties_t *props)
 	obs_property_list_add_int(bs, obs_module_text("Sun-kissed (across the nose)"), 2);
 	obs_properties_add_color(c, "mk_shadow_color", obs_module_text("Eyeshadow colour"));
 	obs_properties_add_int_slider(c, "mk_shadow_opacity", obs_module_text("Eyeshadow"), 0, 100, 1);
-	obs_properties_add_int_slider(c, "mk_liner", obs_module_text("Eyeliner"), 0, 100, 1);
+	obs_property_t *ls = obs_properties_add_list(c, "mk_liner_style", obs_module_text("Eyeliner"),
+						     OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(ls, obs_module_text("None"), 0);
+	obs_property_list_add_int(ls, obs_module_text("Classic"), 1);
+	obs_property_list_add_int(ls, obs_module_text("Winged"), 2);
+	obs_property_list_add_int(ls, obs_module_text("Cat eye"), 3);
+	obs_property_list_add_int(ls, obs_module_text("Smoky"), 4);
 	obs_properties_add_int_slider(c, "mk_contour", obs_module_text("Contour"), 0, 100, 1);
 	obs_properties_add_int_slider(c, "mk_highlight", obs_module_text("Highlight"), 0, 100, 1);
 	obs_properties_add_int_slider(c, "mk_brow", obs_module_text("Brow tint"), 0, 100, 1);
@@ -232,10 +245,16 @@ void makeup_read(struct makeup_params *mk, obs_data_t *s)
 	obs_color_to_rgb(obs_data_get_int(s, "mk_blush_color"), mk->blush);
 	obs_color_to_rgb(obs_data_get_int(s, "mk_shadow_color"), mk->shadow);
 	float *amounts[] = {&mk->lip_opacity, &mk->lip_gloss, &mk->blush_opacity, &mk->shadow_opacity,
-			    &mk->liner,       &mk->contour,   &mk->highlight,     &mk->brow};
+			    &mk->contour,     &mk->highlight, &mk->brow};
 	for (size_t i = 0; i < COUNT(amount_keys); i++)
 		*amounts[i] = (float)obs_data_get_int(s, amount_keys[i]) / 100.0f;
 	mk->blush_style = (int)obs_data_get_int(s, "mk_blush_style");
+	mk->liner_style = (int)obs_data_get_int(s, "mk_liner_style");
+	if (mk->liner_style < 0 || mk->liner_style >= (int)COUNT(liner_styles))
+		mk->liner_style = 0;
+	/* settings saved when eyeliner was an amount slider: any amount becomes the winged style */
+	if (!obs_data_has_user_value(s, "mk_liner_style") && obs_data_get_int(s, "mk_liner") > 0)
+		mk->liner_style = 2;
 }
 
 /* ---------------- .cube LUT ---------------- */

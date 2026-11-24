@@ -139,14 +139,13 @@ static const std::vector<FeatureGroup> &categories()
 static const Opt SMOOTH{"smooth", "Smooth", {Base::Drop}, false, 50};
 static const Opt FOUNDATION{"foundation", "Foundation", {Base::Compact}, false, 20};
 static const Opt SKIN_TONE{"skin_tone", "Skin tone", {Base::SkinTone}, true, 0};
-static const Opt REDNESS{"redness", "Redness", {Base::Redness}, false, 0};
+static const Opt REDNESS{"redness", "Reduce redness", {Base::Redness}, false, 0};
 static const std::vector<Opt> &tailSliders()
 {
 	static const std::vector<Opt> v = {
-		{"shadows", "Shadows", {Base::UnderEye}, false, 0},
+		{"shadows", "Dark circles", {Base::UnderEye}, false, 0},
 		{"teeth", "Brighten teeth", {Base::Tooth}, false, 0},
 		{"contrast", "Contrast", {Base::Contrast}, false, 0},
-		{"degree", "Smile lines", {Base::Fold}, false, 0},
 	};
 	return v;
 }
@@ -177,6 +176,8 @@ public:
 	void setCustomOpen(bool open)
 	{
 		customPanel->setVisible(open);
+		if (customChevron)
+			customChevron->setText(open ? QStringLiteral("\u25B4") : QStringLiteral("\u25BE"));
 		refresh();
 	}
 	void showAtmoSub(int i)
@@ -230,20 +231,27 @@ private:
 		int i = pages ? pages->currentIndex() : PG_ENHANCE;
 		return PAGE_SWITCH[i < 0 || i >= PG_COUNT ? PG_ENHANCE : i];
 	}
-	/* header switch shows the current tab's state; switched-off tabs are greyed out */
+	/* header switch: Dewy on/off for this source (the filter itself). Each tab's own switch sits
+	 * on its tab; switched-off tabs (and everything, when Dewy is off) are greyed out. */
 	void updateTabSwitch()
 	{
 		if (!filter)
 			return;
 		const char *k = tabSwitchKey();
-		enableToggle->setVisible(k != nullptr); /* Presets has no on/off of its own */
-		if (k)
-			enableToggle->setChecked(getBool(k));
+		bool all_on = obs_source_enabled(filter);
+		enableToggle->setChecked(all_on);
 		if (resetBtn)
 			resetBtn->setToolTip(k ? QStringLiteral("Reset this tab") : QStringLiteral("Reset every tab"));
-		for (int i = 0; i < PG_COUNT && i < (int)pageScrolls.size(); i++)
-			if (QWidget *w = pageScrolls[i]->widget())
-				w->setEnabled(!PAGE_SWITCH[i] || getBool(PAGE_SWITCH[i]));
+		for (int i = 0; i < PG_COUNT; i++) {
+			bool tab_on = !PAGE_SWITCH[i] || getBool(PAGE_SWITCH[i]);
+			if (tabSwitches[i]) {
+				tabSwitches[i]->setChecked(tab_on);
+				tabSwitches[i]->setEnabled(all_on);
+			}
+			if (i < (int)pageScrolls.size())
+				if (QWidget *w = pageScrolls[i]->widget())
+					w->setEnabled(all_on && tab_on);
+		}
 	}
 
 	struct ThumbJob {
@@ -376,7 +384,8 @@ private:
 	void snapshotIfRequested();
 
 	QComboBox *sourceBox = nullptr;
-	Toggle *enableToggle = nullptr;
+	Toggle *enableToggle = nullptr;        /* Dewy on/off (the whole filter) */
+	Toggle *tabSwitches[PG_COUNT] = {}; /* each tab's own on/off, on the tab */
 	QStackedWidget *pages = nullptr;
 	QWidget *content = nullptr;
 	QWidget *emptyState = nullptr;
@@ -387,6 +396,7 @@ private:
 	std::vector<LookTile *> lookTiles;
 	QLabel *lookName = nullptr;
 	QWidget *customPanel = nullptr;
+	QLabel *customChevron = nullptr;
 	bool refreshing = false;
 	bool refreshQueued = false;
 };
@@ -507,6 +517,7 @@ static const char *STYLE = R"(
   border-bottom: 2px solid transparent; padding: 8px 8px; font-size: 14px; font-weight: 600; }
 #BeautyDock QPushButton[role="toptab"]:hover { color: #c8c8d0; }
 #BeautyDock QPushButton[role="toptab"]:checked { color: #ffffff; border-bottom: 2px solid #ffffff; }
+#BeautyDock QPushButton[role="toptab"][sw="true"] { padding-right: 30px; }
 #BeautyDock QPushButton[role="primary"] { background: #fe2c55; color: white; border: none; border-radius: 9px;
   padding: 9px 16px; font-weight: 600; }
 #BeautyDock QPushButton[role="primary"]:hover { background: #ff4a6e; }
@@ -514,6 +525,7 @@ static const char *STYLE = R"(
   padding: 5px 10px; font-size: 12px; }
 #BeautyDock QPushButton[role="chip"]:checked { background: #eeeef1; color: #161619; }
 #BeautyDock QFrame[role="card"] { background: #212125; border-radius: 12px; }
+#BeautyDock QPushButton[role="tray"] { background: transparent; border: none; padding: 0; text-align: left; }
 #BeautyDock QFrame[role="hint"] { background: #232328; border-radius: 10px; }
 #BeautyDock QCheckBox { color: #c8c8d0; spacing: 8px; }
 #BeautyDock QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #45454c;
@@ -810,12 +822,13 @@ QWidget *BeautyDock::buildHeader()
 	updateBanner->hide();
 
 	enableToggle = new Toggle(w);
-	enableToggle->setToolTip(QStringLiteral("Turn this tab on / off"));
+	enableToggle->setToolTip(QStringLiteral("Turn Dewy on / off"));
 	enableToggle->onToggled = [this](bool on) {
-		if (const char *k = tabSwitchKey())
-			setBool(k, on);
+		if (filter)
+			obs_source_set_enabled(filter, on);
 		updateTabSwitch();
 	};
+	locators["power"] = enableToggle;
 	row->addWidget(enableToggle);
 	v->addLayout(row);
 	v->addWidget(updateBanner);
@@ -840,8 +853,19 @@ QWidget *BeautyDock::buildHeader()
 		updateTabSwitch();
 		refreshThumbs();
 	};
-	for (int i = 0; i < PG_COUNT; i++)
+	for (int i = 0; i < PG_COUNT; i++) {
 		locators[std::string("tab:") + PAGE_NAMES[i]] = topTabs->button(i);
+		if (!PAGE_SWITCH[i])
+			continue; /* Presets has no on/off of its own */
+		tabSwitches[i] = topTabs->addSwitch(i);
+		tabSwitches[i]->setToolTip(QStringLiteral("Turn %1 on / off").arg(topTabs->button(i)->property("text").toString()));
+		locators[std::string("switch:") + PAGE_NAMES[i]] = tabSwitches[i];
+		const char *key = PAGE_SWITCH[i];
+		tabSwitches[i]->onToggled = [this, key](bool on) {
+			setBool(key, on);
+			updateTabSwitch();
+		};
+	}
 	locators["tabs:next"] = topTabs->chevron(true);
 	locators["tabs:prev"] = topTabs->chevron(false);
 	v->addWidget(topTabs);
@@ -1095,7 +1119,9 @@ static std::vector<LookArt> readLooks()
 			a.blushStyle = (int)obs_data_get_int(mk, "blush_style");
 			a.shadow = col("shadow_color", a.shadow);
 			a.shadowOpacity = obs_data_get_double(mk, "shadow_opacity");
-			a.liner = obs_data_get_double(mk, "liner");
+			const char *ls = obs_data_get_string(mk, "liner_style"); /* line weight for the drawing */
+			a.liner = !strcmp(ls, "classic") ? 0.25 : !strcmp(ls, "winged") ? 0.45 : !strcmp(ls, "cat") ? 0.7
+				: !strcmp(ls, "smoky") ? 0.55 : 0.0;
 			a.contour = obs_data_get_double(mk, "contour");
 			a.highlight = obs_data_get_double(mk, "highlight");
 			a.brow = obs_data_get_double(mk, "brow");
@@ -1148,15 +1174,49 @@ QWidget *BeautyDock::buildMakeup()
 	}
 	v->addWidget(card);
 
-	/* customise panel */
-	customPanel = new QFrame(page);
-	customPanel->setProperty("role", "card");
-	auto *pv = new QVBoxLayout(customPanel);
-	pv->setContentsMargins(14, 12, 14, 12);
-	pv->setSpacing(8);
-	auto *ct = new QLabel(QStringLiteral("Customise"), customPanel);
+	/* customise tray: a full-width card at the bottom of the page; its header opens the controls
+	 * for every part of the look right underneath */
+	auto *tray = new QFrame(page);
+	tray->setProperty("role", "card");
+	auto *tl = new QVBoxLayout(tray);
+	tl->setContentsMargins(14, 12, 14, 12);
+	tl->setSpacing(10);
+	auto *trayHead = new QPushButton(tray);
+	trayHead->setProperty("role", "tray");
+	trayHead->setCursor(Qt::PointingHandCursor);
+	trayHead->setAccessibleName(QStringLiteral("Customise"));
+	auto *hl = new QHBoxLayout(trayHead);
+	hl->setContentsMargins(0, 0, 0, 0);
+	hl->setSpacing(8);
+	auto *htext = new QVBoxLayout();
+	htext->setSpacing(1);
+	auto *ct = new QLabel(QStringLiteral("Customise"), trayHead);
 	ct->setProperty("role", "title");
-	pv->addWidget(ct);
+	auto *cs = new QLabel(QStringLiteral("Lips, blush, eyes, contour, brows and colour"), trayHead);
+	cs->setProperty("role", "sub");
+	htext->addWidget(ct);
+	htext->addWidget(cs);
+	hl->addLayout(htext, 1);
+	customChevron = new QLabel(QStringLiteral("\u25BE"), trayHead);
+	customChevron->setStyleSheet(QStringLiteral("color: #8d8d96; font-size: 20px;"));
+	hl->addWidget(customChevron);
+	for (QLabel *l : {ct, cs, customChevron})
+		l->setAttribute(Qt::WA_TransparentForMouseEvents);
+	trayHead->setMinimumHeight(ct->sizeHint().height() + cs->sizeHint().height() + 2);
+	QObject::connect(trayHead, &QPushButton::clicked, this, [this]() { setCustomOpen(!customPanel->isVisible()); });
+	tl->addWidget(trayHead);
+	focusers["look:Customise"] = [this, trayHead]() {
+		showTab(PG_ENHANCE);
+		showEnhanceSub(1);
+		reveal(PG_ENHANCE, trayHead);
+	};
+	locators["look:Customise"] = trayHead;
+
+	customPanel = new QWidget(tray);
+	auto *pv = new QVBoxLayout(customPanel);
+	pv->setContentsMargins(0, 0, 0, 0);
+	pv->setSpacing(8);
+	tl->addWidget(customPanel);
 
 	auto colorRow = [this, pv](const char *label, IconSpec icon, const char *colorKey, const char *amountKey) {
 		auto *head = new QHBoxLayout();
@@ -1202,7 +1262,39 @@ QWidget *BeautyDock::buildMakeup()
 		pv->addLayout(chips);
 	}
 	colorRow("Eyeshadow", {Base::Shadow}, "mk_shadow_color", "mk_shadow_opacity");
-	colorRow("Eyeliner", {Base::Liner}, nullptr, "mk_liner");
+	{ /* eyeliner is a style, not an amount */
+		auto *title = sectionTitle(QStringLiteral("Eyeliner"), {Base::Liner});
+		pv->addWidget(title);
+		focusers["opt:mk_liner_style"] = [this, title]() {
+			showTab(PG_ENHANCE);
+			showEnhanceSub(1);
+			setCustomOpen(true);
+			reveal(PG_ENHANCE, title);
+		};
+		locators["opt:mk_liner_style"] = title;
+		auto *chips = new QHBoxLayout();
+		chips->setSpacing(6);
+		auto *grp = new QButtonGroup(customPanel);
+		const char *styles[] = {"None", "Classic", "Winged", "Cat eye", "Smoky"};
+		std::vector<QPushButton *> bs;
+		for (int i = 0; i < 5; i++) {
+			auto *b = new QPushButton(QString::fromUtf8(styles[i]), customPanel);
+			b->setProperty("role", "chip");
+			b->setCheckable(true);
+			b->setCursor(Qt::PointingHandCursor);
+			grp->addButton(b, i);
+			chips->addWidget(b);
+			bs.push_back(b);
+		}
+		chips->addStretch(1);
+		QObject::connect(grp, &QButtonGroup::idClicked, this, [this](int id) { setInt("mk_liner_style", id); });
+		refreshers.push_back([this, bs]() {
+			int s = (int)getInt("mk_liner_style");
+			for (int i = 0; i < 5; i++)
+				bs[i]->setChecked(i == s);
+		});
+		pv->addLayout(chips);
+	}
 	colorRow("Contour", {Base::Sculpt}, nullptr, "mk_contour");
 	colorRow("Highlight", {Base::Glow}, nullptr, "mk_highlight");
 	colorRow("Brow tint", {Base::Brow}, nullptr, "mk_brow");
@@ -1261,11 +1353,7 @@ QWidget *BeautyDock::buildMakeup()
 	LookArt none;
 	none.name = "None";
 	none.none = true;
-	LookArt custom;
-	custom.name = "Customise";
-	custom.custom = true;
 	looks.push_back(none);
-	looks.push_back(custom);
 	for (auto &l : readLooks())
 		looks.push_back(l);
 	for (auto &l : looks) {
@@ -1278,28 +1366,19 @@ QWidget *BeautyDock::buildMakeup()
 			reveal(PG_ENHANCE, t);
 		};
 		locators["look:" + l.name.toStdString()] = t;
-		if (l.custom) {
-			t->onClicked = [this]() {
-				customPanel->setVisible(!customPanel->isVisible());
-				refresh();
-			};
-		} else {
-			QString name = l.name;
-			t->onClicked = [this, name]() {
-				setString("makeup_preset", name.toUtf8().constData());
-			};
-		}
+		QString name = l.name;
+		t->onClicked = [this, name]() { setString("makeup_preset", name.toUtf8().constData()); };
 	}
 	refreshers.push_back([this]() {
 		QString cur = QString::fromStdString(getString("makeup_preset"));
 		if (cur.isEmpty())
 			cur = "None";
 		for (auto *t : lookTiles)
-			t->setSelected(t->art().custom ? customPanel->isVisible() : t->art().name == cur);
+			t->setSelected(t->art().name == cur);
 		lookName->setText(cur == "None" ? QStringLiteral("No look") : cur);
 	});
 	v->addWidget(grid);
-	v->addWidget(customPanel);
+	v->addWidget(tray);
 	v->addStretch(1);
 	return page;
 }
@@ -1997,6 +2076,9 @@ void BeautyDock::bindToSelection()
 	content->setVisible(bound);
 	emptyState->setVisible(!bound);
 	enableToggle->setEnabled(bound);
+	for (Toggle *t : tabSwitches)
+		if (t)
+			t->setEnabled(bound);
 	if (!src)
 		emptyLabel->setText(QStringLiteral("Add a camera source to your scene, then pick it above."));
 	else
@@ -2149,6 +2231,12 @@ void BeautyDock::snapshotIfRequested()
 		d->show();
 		QApplication::processEvents();
 		d->bindToSelection();
+		/* render a bound dock with Dewy switched on even if the selected source has none (or has
+		 * it off): try the others (this offscreen copy never saves its selection) */
+		for (int k = 0; (!d->filter || !obs_source_enabled(d->filter)) && k < d->sourceBox->count(); k++) {
+			d->sourceBox->setCurrentIndex(k);
+			d->bindToSelection();
+		}
 		for (int i = 0; i < PG_COUNT; i++) {
 			d->showTab(i);
 			QApplication::processEvents();
@@ -2163,6 +2251,22 @@ void BeautyDock::snapshotIfRequested()
 		d->resize(380, 760);
 		QApplication::processEvents();
 		d->grab().save(out + "/dock-default-size.png");
+		/* the off states: one tab switched off, then Dewy itself; both put back at once */
+		if (d->filter) {
+			d->showTab(PG_EFFECTS);
+			bool fx = d->getBool("effects_on");
+			d->setBool("effects_on", false);
+			d->updateTabSwitch();
+			QApplication::processEvents();
+			d->grab().save(out + "/state-effects-off.png");
+			d->setBool("effects_on", fx);
+			bool was = obs_source_enabled(d->filter);
+			obs_source_set_enabled(d->filter, false);
+			d->updateTabSwitch();
+			QApplication::processEvents();
+			d->grab().save(out + "/state-dewy-off.png");
+			obs_source_set_enabled(d->filter, was);
+		}
 		d->deleteLater();
 	});
 }

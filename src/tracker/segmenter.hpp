@@ -1,4 +1,5 @@
-// Learned skin / person segmentation (MediaPipe selfie multiclass via ONNX Runtime).
+// Learned skin / person segmentation (MediaPipe selfie multiclass): ONNX Runtime on Windows
+// (segmenter.cpp), Core ML on macOS (segmenter-coreml.mm).
 // Output is an RGBA8 mask covering the whole frame:
 //   R = skin (face + body), G = face skin, B = hair, A = person (1 - background)
 #pragma once

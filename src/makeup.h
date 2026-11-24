@@ -16,7 +16,8 @@ struct makeup_params {
 	float blush[3], blush_opacity;
 	int blush_style;
 	float shadow[3], shadow_opacity;
-	float liner, contour, highlight, brow;
+	int liner_style; /* 0 none, 1 classic, 2 winged, 3 cat eye, 4 smoky (face-liner.png channels 1..4) */
+	float contour, highlight, brow;
 };
 
 void makeup_presets_load(void);

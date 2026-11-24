@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define FT_MAX_POINTS 192
+#define FT_MAX_POINTS 720
 
 typedef struct {
 	float x, y;
@@ -27,8 +27,11 @@ enum ft_region {
 	FT_INNER_LIPS,
 	FT_LEFT_PUPIL,
 	FT_RIGHT_PUPIL,
+	FT_MESH, /* MediaPipe face mesh, 468 points in mesh index order (MediaPipe backend; empty with Vision) */
 	FT_REGION_COUNT
 };
+
+#define FT_MESH_POINTS 468
 
 typedef struct {
 	bool valid;   /* landmarks are usable (a face was seen at some point) */
@@ -43,6 +46,32 @@ typedef struct {
 	bool skin_valid;
 	float skin_cbcr[2]; /* mean cheek chroma (BT.601 full range, 0..1) */
 } ft_face;
+
+/* Eye anchor for building a face frame: the midpoint of the two eye corners when the mesh is
+ * there (corners don't move when the lids do, so blinking can't shift the frame), otherwise the
+ * centroid of the eye outline. eye: 0 = FT_LEFT_EYE, 1 = FT_RIGHT_EYE. */
+static inline ft_point ft_eye_anchor(const ft_face *f, int eye)
+{
+	ft_point c = {0, 0};
+	if (f->region_count[FT_MESH] >= FT_MESH_POINTS) {
+		/* subject's left eye (FT_LEFT_EYE) corners 263 / 362, right eye 33 / 133 */
+		const ft_point *m = &f->pts[f->region_start[FT_MESH]];
+		ft_point a = eye ? m[33] : m[263], b = eye ? m[133] : m[362];
+		c.x = (a.x + b.x) * 0.5f;
+		c.y = (a.y + b.y) * 0.5f;
+		return c;
+	}
+	int r = eye ? FT_RIGHT_EYE : FT_LEFT_EYE, n = f->region_count[r];
+	for (int i = 0; i < n; i++) {
+		c.x += f->pts[f->region_start[r] + i].x;
+		c.y += f->pts[f->region_start[r] + i].y;
+	}
+	if (n) {
+		c.x /= (float)n;
+		c.y /= (float)n;
+	}
+	return c;
+}
 
 typedef struct face_tracker face_tracker_t;
 
@@ -74,6 +103,8 @@ bool face_tracker_get_at(face_tracker_t *ft, uint64_t frame_id, ft_face *out);
 
 /* Skin / person segmentation on its own thread, only while enabled. */
 void face_tracker_set_segmentation(face_tracker_t *ft, bool enabled);
+/* How often segmentation may run: fast (~30 Hz, the light follows the body with it) or ~15 Hz. */
+void face_tracker_set_segmentation_fast(face_tracker_t *ft, bool fast);
 
 /* Newer segmentation mask than *serial? Returns a malloc'd RGBA8 copy (free() it), w x h,
  * covering the whole frame: R skin, G face skin, B hair, A person. Temporally smoothed.

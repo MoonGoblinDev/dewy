@@ -10,11 +10,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "")
 
-# Face tracking backend: Apple Vision on macOS, ONNX Runtime elsewhere (also usable on macOS).
+# Face tracking backend: MediaPipe Face Landmarker, on Core ML (macOS) or ONNX Runtime (Windows).
 if(APPLE)
-  set(BEAUTY_TRACKER "vision" CACHE STRING "Face tracker backend: vision or onnx")
+  # coreml: MediaPipe on Core ML (default). onnx: the same models on ONNX Runtime (comparison
+  # builds). vision: Apple Vision, which has no 468-point mesh, so the mesh-anchored makeup is off.
+  set(BEAUTY_TRACKER "coreml" CACHE STRING "Face tracker backend: coreml (default), onnx or vision")
 else()
   set(BEAUTY_TRACKER "onnx" CACHE STRING "Face tracker backend: onnx")
+endif()
+# ONNX Runtime (also for the segmentation): always on Windows, on macOS only with BEAUTY_TRACKER=onnx
+if(WIN32 OR BEAUTY_TRACKER STREQUAL "onnx")
+  set(BEAUTY_ORT ON)
+else()
+  set(BEAUTY_ORT OFF)
 endif()
 
 set(OBS_VERSION "33.0.0" CACHE STRING "OBS version to build against")
@@ -72,9 +80,10 @@ elseif(WIN32)
 endif()
 
 # ---------------------------------------------------------------- ONNX Runtime + models
-# Skin segmentation runs on ONNX Runtime on every platform (Core ML on macOS, DirectML on
-# Windows); the face landmarks use it too unless BEAUTY_TRACKER=vision.
-if(TRUE)
+# Windows: landmarks and skin segmentation on ONNX Runtime with DirectML. macOS runs the same
+# models converted to Core ML (data/models/coreml, see "Core ML models" below) unless
+# BEAUTY_TRACKER=onnx.
+if(BEAUTY_ORT)
   if(APPLE)
     set(ORT_DIR "${DEPS}/onnxruntime-osx-arm64-${ORT_VERSION_MAC}")
     fetch("https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION_MAC}/onnxruntime-osx-arm64-${ORT_VERSION_MAC}.tgz"
@@ -118,8 +127,7 @@ add_library(dewy MODULE
   src/presets.c
   src/fx-layers.c
   src/tracker/tracker-core.cpp
-  src/tracker/onnx-common.cpp
-  src/tracker/segmenter.cpp
+  src/tracker/tracker-util.cpp
   src/tracker/pigment-calib.cpp
   src/dock/beauty-dock.cpp
   src/dock/widgets.cpp
@@ -131,14 +139,25 @@ if(APPLE)
 elseif(WIN32)
   target_sources(dewy PRIVATE src/dock/http-win.cpp)
 endif()
+if(BEAUTY_ORT)
+  target_sources(dewy PRIVATE src/tracker/onnx-common.cpp src/tracker/segmenter.cpp)
+  target_include_directories(dewy PRIVATE "${ORT_INCLUDE}")
+else()
+  target_sources(dewy PRIVATE src/tracker/coreml-common.mm src/tracker/segmenter-coreml.mm)
+  set_source_files_properties(src/tracker/coreml-common.mm src/tracker/segmenter-coreml.mm
+                              PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+endif()
 if(BEAUTY_TRACKER STREQUAL "vision")
   target_sources(dewy PRIVATE src/tracker/backend-vision.mm)
   target_compile_definitions(dewy PRIVATE BEAUTY_TRACKER_VISION)
   set_source_files_properties(src/tracker/backend-vision.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+elseif(BEAUTY_TRACKER STREQUAL "coreml")
+  target_sources(dewy PRIVATE src/tracker/mediapipe.cpp src/tracker/backend-coreml.mm)
+  target_compile_definitions(dewy PRIVATE BEAUTY_TRACKER_COREML)
+  set_source_files_properties(src/tracker/backend-coreml.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 else()
-  target_sources(dewy PRIVATE src/tracker/backend-onnx.cpp)
+  target_sources(dewy PRIVATE src/tracker/mediapipe.cpp src/tracker/backend-onnx.cpp)
 endif()
-target_include_directories(dewy PRIVATE "${ORT_INCLUDE}")
 
 target_include_directories(dewy PRIVATE "${OBS_SRC}/libobs" "${OBS_GEN_DIR}" "${FRONTEND_DIR}" "${WEBSOCKET_DIR}" src src/tracker)
 target_compile_definitions(dewy PRIVATE PLUGIN_VERSION="${PROJECT_VERSION}" BEAUTY_HAVE_LIBOBS)
@@ -159,7 +178,8 @@ if(APPLE)
   target_link_libraries(dewy PRIVATE
     "-framework libobs" "${OBS_APP}/Contents/Frameworks/libobs-frontend-api.1.dylib"
     "-framework QtWidgets" "-framework QtGui" "-framework QtCore"
-    "-framework Foundation" "-framework CoreVideo" "-framework CoreGraphics" "-framework Vision")
+    "-framework Foundation" "-framework CoreVideo" "-framework CoreGraphics" "-framework Vision"
+    "-framework CoreML" "-framework Accelerate")
 elseif(WIN32)
   # OBS doesn't ship import libraries, so make them from the official release's DLLs
   # (all of these export plain C symbols).
@@ -199,7 +219,11 @@ endif()
 
 # ---------------------------------------------------------------- data + packaging
 file(GLOB_RECURSE PLUGIN_DATA RELATIVE "${CMAKE_SOURCE_DIR}/data" CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/data/*")
-if(NOT BEAUTY_TRACKER STREQUAL "onnx")
+list(FILTER PLUGIN_DATA EXCLUDE REGEX "^models/coreml/") # compiled below (macOS)
+if(NOT BEAUTY_ORT)
+  list(FILTER PLUGIN_DATA EXCLUDE REGEX "^models/.*\\.onnx$")
+endif()
+if(BEAUTY_TRACKER STREQUAL "vision")
   list(FILTER PLUGIN_DATA EXCLUDE REGEX "^models/face_") # Vision does the landmarks itself
 endif()
 list(FILTER PLUGIN_DATA EXCLUDE REGEX "README\\.md$")
@@ -210,10 +234,41 @@ if(APPLE)
     target_sources(dewy PRIVATE "data/${f}")
     set_source_files_properties("data/${f}" PROPERTIES MACOSX_PACKAGE_LOCATION "Resources/${dir}")
   endforeach()
-  target_sources(dewy PRIVATE "${ORT_RUNTIME}")
-  set_source_files_properties("${ORT_RUNTIME}" PROPERTIES MACOSX_PACKAGE_LOCATION "Frameworks")
-  get_filename_component(ORT_NAME "${ORT_RUNTIME}" NAME)
-  target_compile_definitions(dewy PRIVATE BEAUTY_ORT_FILE="${ORT_NAME}")
+  if(BEAUTY_ORT)
+    target_sources(dewy PRIVATE "${ORT_RUNTIME}")
+    set_source_files_properties("${ORT_RUNTIME}" PROPERTIES MACOSX_PACKAGE_LOCATION "Frameworks")
+    get_filename_component(ORT_NAME "${ORT_RUNTIME}" NAME)
+    target_compile_definitions(dewy PRIVATE BEAUTY_ORT_FILE="${ORT_NAME}")
+  else()
+    # Core ML models: data/models/coreml/*.mlpackage (made by tools/convert-coreml.py) compiled
+    # to .mlmodelc here and copied into the bundle's Resources/models
+    set(COREML_OUT "${CMAKE_BINARY_DIR}/coreml")
+    set(COREML_MODELS selfie_multiclass_256)
+    if(BEAUTY_TRACKER STREQUAL "coreml")
+      list(APPEND COREML_MODELS face_detection_yunet face_landmarks_478)
+    endif()
+    set(COREML_COMPILED "")
+    foreach(m IN LISTS COREML_MODELS)
+      set(pkg "${CMAKE_SOURCE_DIR}/data/models/coreml/${m}.mlpackage")
+      if(NOT EXISTS "${pkg}")
+        message(FATAL_ERROR "missing ${pkg}: run tools/convert-coreml.py")
+      endif()
+      file(GLOB_RECURSE pkg_files CONFIGURE_DEPENDS "${pkg}/*")
+      add_custom_command(OUTPUT "${COREML_OUT}/${m}.mlmodelc/coremldata.bin"
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "${COREML_OUT}/${m}.mlmodelc"
+        COMMAND xcrun coremlcompiler compile "${pkg}" "${COREML_OUT}" > /dev/null
+        DEPENDS ${pkg_files}
+        COMMENT "Compiling Core ML model ${m}")
+      list(APPEND COREML_COMPILED "${COREML_OUT}/${m}.mlmodelc/coremldata.bin")
+      add_custom_command(TARGET dewy POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "$<TARGET_BUNDLE_CONTENT_DIR:dewy>/Resources/models/${m}.mlmodelc"
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "${COREML_OUT}/${m}.mlmodelc"
+                "$<TARGET_BUNDLE_CONTENT_DIR:dewy>/Resources/models/${m}.mlmodelc")
+    endforeach()
+    add_custom_target(coreml-models DEPENDS ${COREML_COMPILED})
+    add_dependencies(dewy coreml-models)
+    set_property(TARGET dewy APPEND PROPERTY LINK_DEPENDS ${COREML_COMPILED}) # re-copy when a model changes
+  endif()
   set_target_properties(dewy PROPERTIES
     BUNDLE TRUE BUNDLE_EXTENSION plugin PREFIX ""
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/cmake/Info.plist.in"

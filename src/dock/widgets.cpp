@@ -618,7 +618,7 @@ void CircleButton::mousePressEvent(QMouseEvent *e)
 
 /* ============================== toggle ============================== */
 
-Toggle::Toggle(QWidget *parent) : QWidget(parent)
+Toggle::Toggle(QWidget *parent, QSize size) : QWidget(parent), sz(size)
 {
 	setFixedSize(sizeHint());
 	setCursor(Qt::PointingHandCursor);
@@ -629,11 +629,14 @@ void Toggle::paintEvent(QPaintEvent *)
 	QPainter p(this);
 	p.setRenderHint(QPainter::Antialiasing);
 	p.setPen(Qt::NoPen);
+	if (!isEnabled())
+		p.setOpacity(0.35);
+	double h = height() / 2.0;
 	p.setBrush(on ? theme::blue : theme::line);
-	p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 11, 11);
+	p.drawRoundedRect(rect().adjusted(1, 1, -1, -1), h - 1, h - 1);
 	p.setBrush(Qt::white);
-	double x = on ? width() - 12.5 : 12.5;
-	p.drawEllipse(QPointF(x, height() / 2.0), 9, 9);
+	double x = on ? width() - h - 0.5 : h + 0.5;
+	p.drawEllipse(QPointF(x, h), h - 3, h - 3);
 }
 
 void Toggle::mousePressEvent(QMouseEvent *)
@@ -642,6 +645,24 @@ void Toggle::mousePressEvent(QMouseEvent *)
 	update();
 	if (onToggled)
 		onToggled(on);
+}
+
+void PowerToggle::paintEvent(QPaintEvent *)
+{
+	QPainter p(this);
+	p.setRenderHint(QPainter::Antialiasing);
+	if (!isEnabled())
+		p.setOpacity(0.35);
+	QColor c = isChecked() ? theme::dewy : (hover ? theme::text : theme::sub);
+	if (isChecked() && hover)
+		c = c.lighter(110);
+	p.setPen(QPen(c, 1.9, Qt::SolidLine, Qt::RoundCap));
+	p.setBrush(Qt::NoBrush);
+	/* ring open at the top, with the stem through the gap */
+	QRectF r = QRectF(rect()).adjusted(3.5, 4.5, -3.5, -2.5);
+	p.drawArc(r, 125 * 16, 290 * 16); /* counter-clockwise from upper left round to upper right */
+	QPointF top(r.center().x(), rect().top() + 2.5);
+	p.drawLine(top, QPointF(top.x(), r.center().y()));
 }
 
 /* ============================== icon button ============================== */
@@ -1106,8 +1127,34 @@ void TopTabs::addTab(const QString &text, IconSpec icon)
 	});
 	row->insertWidget(row->count() - 1, b);
 	buttons.push_back(b);
+	switches.push_back(nullptr);
 	if (idx == 0)
 		b->setChecked(true);
+}
+
+Toggle *TopTabs::addSwitch(int i)
+{
+	if (i < 0 || i >= (int)buttons.size() || switches[i])
+		return i >= 0 && i < (int)switches.size() ? switches[i] : nullptr;
+	QPushButton *b = buttons[i];
+	auto *t = new PowerToggle(b);
+	switches[i] = t;
+	b->setProperty("sw", true); /* stylesheet leaves room on the right */
+	b->style()->unpolish(b);
+	b->style()->polish(b);
+	b->installEventFilter(this);
+	t->move(b->width() - t->width() - 6, (b->height() - t->height()) / 2);
+	return t;
+}
+
+bool TopTabs::eventFilter(QObject *o, QEvent *e)
+{
+	if (e->type() == QEvent::Resize)
+		for (size_t k = 0; k < buttons.size(); k++)
+			if (buttons[k] == o && switches[k])
+				switches[k]->move(buttons[k]->width() - switches[k]->width() - 6,
+						  (buttons[k]->height() - switches[k]->height()) / 2);
+	return QWidget::eventFilter(o, e);
 }
 
 void TopTabs::setCurrent(int i)

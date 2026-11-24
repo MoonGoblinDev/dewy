@@ -34,7 +34,10 @@ struct fx_layers {
 	obs_data_t *effect_shape;
 
 	gs_effect_t *post;
-	gs_texrender_t *tr_lut, *tr_fx, *tr_post;
+	gs_texrender_t *tr_lut, *tr_fx, *tr_post, *tr_mk_lut;
+	gs_texture_t *mk_lut; /* not owned: the beauty filter's makeup LUT */
+	int mk_lut_size;
+	float mk_lut_amt;
 
 	/* per-tab switches */
 	bool effects_on, atmo_on, filters_on, lights_on;
@@ -68,6 +71,7 @@ struct fx_layers *fx_layers_create(void)
 	fx->tr_lut = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	fx->tr_fx = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	fx->tr_post = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	fx->tr_mk_lut = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 	obs_leave_graphics();
 	return fx;
 }
@@ -91,6 +95,7 @@ void fx_layers_destroy(struct fx_layers *fx)
 	gs_texrender_destroy(fx->tr_lut);
 	gs_texrender_destroy(fx->tr_fx);
 	gs_texrender_destroy(fx->tr_post);
+	gs_texrender_destroy(fx->tr_mk_lut);
 	gs_texture_destroy(fx->filter_lut);
 	free_sprites(fx);
 	bfree(fx);
@@ -168,10 +173,22 @@ static bool effect_active(const struct fx_layers *fx)
 	return fx->effects_on && (fx->effect.sprite_count > 0 || fx->effect.shape);
 }
 
+void fx_layers_set_makeup_lut(struct fx_layers *fx, gs_texture_t *lut, int size, float amount)
+{
+	fx->mk_lut = lut;
+	fx->mk_lut_size = size;
+	fx->mk_lut_amt = lut && size > 1 ? amount : 0.0f;
+}
+
 bool fx_layers_active(const struct fx_layers *fx)
 {
-	return (fx->filter_lut && fx->filter_amt > 0) || (fx->light_on && fx->light_amt > 0) || post_active(fx) ||
+	return (fx->mk_lut && fx->mk_lut_amt > 0) || (fx->filter_lut && fx->filter_amt > 0) || (fx->light_on && fx->light_amt > 0) || post_active(fx) ||
 	       effect_active(fx);
+}
+
+bool fx_layers_light_active(const struct fx_layers *fx)
+{
+	return fx->light_on && fx->light_amt > 0;
 }
 
 bool fx_layers_needs_face(const struct fx_layers *fx)
@@ -272,6 +289,27 @@ static void draw_sprites(struct fx_layers *fx, const struct face_layout *L, floa
 	}
 }
 
+static gs_texture_t *lut_pass(struct fx_layers *fx, gs_texrender_t *tr, gs_texture_t *cur, gs_texture_t *lut, int size,
+				 float amount, uint32_t w, uint32_t h)
+{
+	if (!lut || amount <= 0.0f)
+		return cur;
+	gs_effect_t *e = fx->post;
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), cur);
+	gs_effect_set_texture(gs_effect_get_param_by_name(e, "filter_lut_tex"), lut);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "filter_lut_size"), (float)size);
+	gs_effect_set_float(gs_effect_get_param_by_name(e, "filter_lut_amt"), amount);
+	gs_texrender_reset(tr);
+	if (!gs_texrender_begin(tr, w, h))
+		return cur;
+	gs_ortho(0.0f, (float)w, 0.0f, (float)h, -100.0f, 100.0f);
+	gs_enable_blending(false);
+	while (gs_effect_loop(e, "FilterLut"))
+		gs_draw_sprite(cur, 0, w, h);
+	gs_texrender_end(tr);
+	return gs_texrender_get_texture(tr);
+}
+
 gs_texture_t *fx_layers_render(struct fx_layers *fx, gs_texture_t *in, uint32_t w, uint32_t h,
 			       const struct face_layout *L, float face_weight, float t)
 {
@@ -279,23 +317,10 @@ gs_texture_t *fx_layers_render(struct fx_layers *fx, gs_texture_t *in, uint32_t 
 		return in;
 	gs_texture_t *cur = in;
 
-	/* Filters tab LUT (its own pass: the final effect is at libobs's 8-texture limit) */
-	if (fx->filter_lut && fx->filter_amt > 0) {
-		gs_effect_t *e = fx->post;
-		gs_effect_set_texture(gs_effect_get_param_by_name(e, "image"), cur);
-		gs_effect_set_texture(gs_effect_get_param_by_name(e, "filter_lut_tex"), fx->filter_lut);
-		gs_effect_set_float(gs_effect_get_param_by_name(e, "filter_lut_size"), (float)FILTER_LUT_N);
-		gs_effect_set_float(gs_effect_get_param_by_name(e, "filter_lut_amt"), fx->filter_amt);
-		gs_texrender_reset(fx->tr_lut);
-		if (gs_texrender_begin(fx->tr_lut, w, h)) {
-			gs_ortho(0.0f, (float)w, 0.0f, (float)h, -100.0f, 100.0f);
-			gs_enable_blending(false);
-			while (gs_effect_loop(e, "FilterLut"))
-				gs_draw_sprite(cur, 0, w, h);
-			gs_texrender_end(fx->tr_lut);
-			cur = gs_texrender_get_texture(fx->tr_lut);
-		}
-	}
+	/* LUT passes (their own passes: the final effect is at libobs's 8-texture limit): the makeup
+	 * look's .cube LUT, then the Filters tab's */
+	cur = lut_pass(fx, fx->tr_mk_lut, cur, fx->mk_lut, fx->mk_lut_size, fx->mk_lut_amt, w, h);
+	cur = lut_pass(fx, fx->tr_lut, cur, fx->filter_lut, FILTER_LUT_N, fx->filter_amt, w, h);
 
 	/* stickers */
 	if (fx->effects_on && fx->effect.sprite_count > 0 && L->has_face && face_weight > 0.01f) {

@@ -25,8 +25,9 @@ public:
 			     int &mh) = 0;
 };
 
-/* models_dir: folder holding the ONNX models (unused by the Vision backend). */
+/* models_dir: folder holding the models (ONNX, or compiled Core ML on macOS; unused by Vision). */
 std::unique_ptr<TrackerBackend> create_vision_backend();
 std::unique_ptr<TrackerBackend> create_onnx_backend(const std::string &models_dir);
+std::unique_ptr<TrackerBackend> create_coreml_backend(const std::string &models_dir);
 
 } // namespace beauty

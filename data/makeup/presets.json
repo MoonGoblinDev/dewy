@@ -60,7 +60,7 @@
         "blush_style": 2,
         "shadow_color": "#D49070",
         "shadow_opacity": 0.25,
-        "liner": 0.1,
+        "liner_style": "classic",
         "highlight": 0.2
       }
     },
@@ -80,7 +80,7 @@
         "blush_style": 0,
         "shadow_color": "#C07A8A",
         "shadow_opacity": 0.25,
-        "liner": 0.15,
+        "liner_style": "classic",
         "highlight": 0.2
       }
     },
@@ -102,7 +102,7 @@
         "blush_style": 0,
         "shadow_color": "#D9A090",
         "shadow_opacity": 0.15,
-        "liner": 0.1,
+        "liner_style": "classic",
         "contour": 0.05,
         "highlight": 0.35,
         "brow": 0.1
@@ -124,7 +124,7 @@
         "blush_style": 2,
         "shadow_color": "#E28AA0",
         "shadow_opacity": 0.3,
-        "liner": 0.35,
+        "liner_style": "winged",
         "highlight": 0.3
       }
     },
@@ -143,7 +143,7 @@
         "blush_style": 1,
         "shadow_color": "#E09060",
         "shadow_opacity": 0.25,
-        "liner": 0.2,
+        "liner_style": "classic",
         "contour": 0.15,
         "highlight": 0.2
       }
@@ -164,7 +164,7 @@
         "blush_style": 1,
         "shadow_color": "#7A4A60",
         "shadow_opacity": 0.35,
-        "liner": 0.4,
+        "liner_style": "winged",
         "contour": 0.2,
         "highlight": 0.15,
         "brow": 0.2
@@ -185,7 +185,7 @@
         "blush_style": 1,
         "shadow_color": "#3A3030",
         "shadow_opacity": 0.55,
-        "liner": 0.6,
+        "liner_style": "smoky",
         "contour": 0.3,
         "highlight": 0.2,
         "brow": 0.3
@@ -207,7 +207,7 @@
         "blush_style": 1,
         "shadow_color": "#9A6A40",
         "shadow_opacity": 0.45,
-        "liner": 0.5,
+        "liner_style": "cat",
         "contour": 0.4,
         "highlight": 0.4,
         "brow": 0.3

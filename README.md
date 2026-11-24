@@ -29,7 +29,7 @@ never touched.
 | Tab | What it does |
 |---|---|
 | **Presets** | 26 one-click full looks (Everyday, Glam, Studio, Mood, Men) that set every tab at once, plus your own: save the current look in one click, right-click to rename or delete |
-| **Enhance → Appearance** | Smooth (keeps pores and grain), Foundation, Skin tone (lighter / deeper), Redness, Shadows (dark circles), smile lines, teeth whitening, bright eyes, clarity, plus 27 reshape sliders for face, eyes, nose, mouth and brows |
+| **Enhance → Appearance** | Smooth (keeps pores and grain), Foundation, Skin tone (lighter / deeper), Reduce redness, Dark circles, teeth whitening, bright eyes, contrast, plus 27 reshape sliders for face, eyes, nose, mouth and brows |
 | **Enhance → Makeup** | 15 looks, or build your own: lipstick and gloss, blush (3 placements), eyeshadow, eyeliner, contour, highlight, brow tint, colour grade and `.cube` LUTs |
 | **Effects** | 23 face-tracked stickers and distortions (ears, glasses, crowns, freckles, …) |
 | **Atmosphere** | 13 GPU particle ambiences and 6 camera-motion effects |
@@ -65,10 +65,9 @@ GitHub's public releases at most once a day and sends nothing else; turn it off 
 
 ## Performance
 
-On an M4 Pro MacBook Pro (1080p camera, 1080p60
-canvas), Dewy with every tab on adds under 1 ms of OBS render time per frame and about 15 % of one
-CPU core, with no skipped frames. Face tracking and segmentation run mostly on the Neural Engine on
-macOS and on the GPU (DirectML) on Windows.
+On an M4 Pro MacBook Pro (1080p camera, 1080p60 canvas), Dewy adds under 1 ms of OBS render time
+per frame, with no skipped frames. On macOS the face mesh and segmentation run on the Neural
+Engine through Core ML (about 2 ms of CPU a frame for both); on Windows they run on the GPU (DirectML).
 
 ## Building from source
 
@@ -77,7 +76,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 ## Credits
 
 - [OBS Studio](https://obsproject.com) (GPL-2.0)
-- [ONNX Runtime](https://onnxruntime.ai) (MIT)
+- [ONNX Runtime](https://onnxruntime.ai) (MIT), Windows
 - Google MediaPipe Face Landmarker and selfie segmentation models (Apache-2.0)
 - OpenCV YuNet (MIT)
 
